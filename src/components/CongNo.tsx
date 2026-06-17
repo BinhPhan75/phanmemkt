@@ -6,13 +6,14 @@
 import React, { useState } from 'react';
 import { useAccounting } from '../utils/accountingState';
 import { Partner } from '../types';
-import { Users, FileMinus, FilePlus, ChevronRight, BookOpen, AlertCircle, Plus } from 'lucide-react';
+import { Users, FileMinus, FilePlus, ChevronRight, BookOpen, AlertCircle, Plus, Search, Building } from 'lucide-react';
 
 export default function CongNo() {
   const { partners, transactions, addPartner } = useAccounting();
   const [selectedAcc, setSelectedAcc] = useState<'131' | '331'>('131');
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('');
   const [selectedSubTab, setSelectedSubTab] = useState<'TONG_HOP' | 'CHI_TIET'>('TONG_HOP');
+  const [partnerSearchQuery, setPartnerSearchQuery] = useState('');
   
   // Modal states for creating a new partner
   const [showAddPartnerModal, setShowAddPartnerModal] = useState(false);
@@ -461,28 +462,119 @@ export default function CongNo() {
       {/* RENDER CONDITIONAL 2: SỔ CHI TIẾT CÔNG NỢ */}
       {selectedSubTab === 'CHI_TIET' && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Left panel: Quick partner selector */}
-          <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col gap-3">
-            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-2">Danh sách đối tác công nợ</h4>
-            
-            <div className="space-y-1 overflow-y-auto max-h-[500px]" id="partner-ledger-list">
-              {currentPartners.map((p, idx) => {
-                const isSelected = activePartnerCode === p.code;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => setSelectedPartnerCode(p.code)}
-                    className={`w-full text-left p-3 rounded-xl transition cursor-pointer flex flex-col gap-1 ${
-                      isSelected 
-                        ? 'bg-slate-800 text-white shadow-xs' 
-                        : 'hover:bg-slate-100/80 text-slate-700'
-                    }`}
-                  >
-                    <span className="font-mono text-[11px] font-bold tracking-tight opacity-75">{p.code}</span>
-                    <span className="text-xs font-bold truncate line-clamp-1">{p.name}</span>
-                  </button>
-                );
-              })}
+          {/* Left panel: Quick partner selector / LISTBOX */}
+          <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-black text-slate-500 uppercase tracking-wider px-1">Listbox đối tác công nợ</h4>
+              <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full font-mono">
+                {currentPartners.length} tổng
+              </span>
+            </div>
+
+            {/* Listbox Search Input Block */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Tìm tên, mã, MST..."
+                value={partnerSearchQuery}
+                onChange={(e) => setPartnerSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 border border-slate-200 bg-slate-50 hover:bg-slate-50/50 rounded-xl text-xs font-medium focus:outline-none focus:bg-white focus:ring-2 focus:ring-indigo-100 focus:border-indigo-600 transition"
+              />
+              {partnerSearchQuery && (
+                <button
+                  onClick={() => setPartnerSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+                >
+                  Xóa
+                </button>
+              )}
+            </div>
+
+            {/* Listbox Container list */}
+            <div 
+              className="space-y-1.5 overflow-y-auto max-h-[500px] pr-1" 
+              id="partner-ledger-listbox"
+              style={{ scrollbarWidth: 'thin' }}
+            >
+              {currentPartners.filter(p => {
+                const query = partnerSearchQuery.trim().toLowerCase();
+                if (!query) return true;
+                return p.name.toLowerCase().includes(query) || p.code.toLowerCase().includes(query) || (p.taxCode && p.taxCode.toLowerCase().includes(query));
+              }).length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-xs font-medium space-y-1">
+                  <p>Không tìm thấy đối tác nào</p>
+                  <p className="text-[10px] font-normal opacity-75">Vui lòng kiểm tra lại từ khóa</p>
+                </div>
+              ) : (
+                currentPartners.filter(p => {
+                  const query = partnerSearchQuery.trim().toLowerCase();
+                  if (!query) return true;
+                  return p.name.toLowerCase().includes(query) || p.code.toLowerCase().includes(query) || (p.taxCode && p.taxCode.toLowerCase().includes(query));
+                }).map((p, idx) => {
+                  const isSelected = activePartnerCode === p.code;
+                  
+                  // Compute brief balance info for each listbox item
+                  const detailed = getPartnerLedgerDetailed(p.code);
+                  const is131 = selectedAcc === '131';
+                  const balance131 = detailed.finalBalDebit - detailed.finalBalCredit;
+                  const balance331 = detailed.finalBalCredit - detailed.finalBalDebit;
+                  
+                  return (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedPartnerCode(p.code)}
+                      className={`w-full text-left p-2.5 rounded-xl transition cursor-pointer flex flex-col gap-1 border ${
+                        isSelected 
+                          ? 'bg-slate-900 border-slate-900 text-white shadow-md' 
+                          : 'hover:bg-slate-50 border-slate-100 hover:border-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className={`font-mono text-[10px] font-bold tracking-tight ${isSelected ? 'text-slate-200' : 'text-slate-400'}`}>
+                          {p.code}
+                        </span>
+                        
+                        {/* Outstanding balance badge inside Listbox item */}
+                        {is131 ? (
+                          balance131 !== 0 ? (
+                            <span className={`text-[9px] font-mono font-bold px-1 py-0.5 rounded ${
+                              isSelected
+                                ? balance131 > 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+                                : balance131 > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            }`}>
+                              {balance131 > 0 ? `Thu: ${balance131.toLocaleString()}đ` : `Dư: ${Math.abs(balance131).toLocaleString()}đ`}
+                            </span>
+                          ) : (
+                            <span className={`text-[9px] font-mono opacity-50 ${isSelected ? 'text-slate-400' : 'text-slate-400'}`}>0đ</span>
+                          )
+                        ) : (
+                          balance331 !== 0 ? (
+                            <span className={`text-[9px] font-mono font-bold px-1 py-0.5 rounded ${
+                              isSelected
+                                ? balance331 > 0 ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'
+                                : balance331 > 0 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+                            }`}>
+                              {balance331 > 0 ? `Trả: ${balance331.toLocaleString()}đ` : `Dư: ${Math.abs(balance331).toLocaleString()}đ`}
+                            </span>
+                          ) : (
+                            <span className={`text-[9px] font-mono opacity-50 ${isSelected ? 'text-slate-400' : 'text-slate-400'}`}>0đ</span>
+                          )
+                        )}
+                      </div>
+                      
+                      <div className={`text-[11px] font-bold leading-normal line-clamp-2 ${isSelected ? 'text-white' : 'text-slate-800'}`}>
+                        {p.name}
+                      </div>
+
+                      <div className={`text-[9px] flex items-center gap-1 opacity-70 ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                        <Building className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate">{p.address || 'Không có địa chỉ'}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 

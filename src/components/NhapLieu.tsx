@@ -9,7 +9,7 @@ import { InventoryItem, Partner, AccountingTransaction, JournalLine } from '../t
 import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, Users, X, RefreshCw, Layers } from 'lucide-react';
 
 export default function NhapLieu() {
-  const { partners, items, accounts, addTransaction, addPartner, currentFiscalYear } = useAccounting();
+  const { partners, items, accounts, addTransaction, addPartner, addItem, currentFiscalYear } = useAccounting();
 
   // Mode state: unified on one screen where the user selects the transaction type
   const [entryMode, setEntryMode] = useState<'KT_GOP' | 'HOA_DON'>('KT_GOP');
@@ -24,6 +24,72 @@ export default function NhapLieu() {
   const [newPartnerOpeningDebit, setNewPartnerOpeningDebit] = useState(0);
   const [newPartnerOpeningCredit, setNewPartnerOpeningCredit] = useState(0);
   const [quickAddError, setQuickAddError] = useState('');
+
+  // Quick add item/materials states
+  const [showQuickAddItem, setShowQuickAddItem] = useState(false);
+  const [newItemCode, setNewItemCode] = useState('');
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemUnit, setNewItemUnit] = useState('Cuộn');
+  const [newItemAccount, setNewItemAccount] = useState('152');
+  const [newItemOpeningQty, setNewItemOpeningQty] = useState(0);
+  const [newItemOpeningValue, setNewItemOpeningValue] = useState(0);
+  const [quickAddItemError, setQuickAddItemError] = useState('');
+  const [quickAddItemTargetIndex, setQuickAddItemTargetIndex] = useState<number | null>(null);
+
+  const handleQuickAddItemSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemCode.trim()) {
+      setQuickAddItemError('Vui lòng nhập mã vật tư!');
+      return;
+    }
+    if (!newItemName.trim()) {
+      setQuickAddItemError('Vui lòng nhập tên vật tư/hàng hóa!');
+      return;
+    }
+    if (!newItemUnit.trim()) {
+      setQuickAddItemError('Vui lòng nhập đơn vị tính!');
+      return;
+    }
+
+    const duplicated = items.some(i => i.code.toLowerCase() === newItemCode.trim().toLowerCase());
+    if (duplicated) {
+      setQuickAddItemError(`Mã vật tư/hàng hóa "${newItemCode.trim()}" đã tồn tại!`);
+      return;
+    }
+
+    const itemPayload: InventoryItem = {
+      id: newItemCode.trim().toUpperCase(),
+      code: newItemCode.trim().toUpperCase(),
+      name: newItemName.trim(),
+      unit: newItemUnit.trim(),
+      account: newItemAccount,
+      openingQty: Number(newItemOpeningQty) || 0,
+      openingValue: Number(newItemOpeningValue) || 0
+    };
+
+    addItem(itemPayload);
+
+    // Auto-select in invoice line
+    if (quickAddItemTargetIndex !== null) {
+      const updated = [...invoiceItems];
+      updated[quickAddItemTargetIndex] = {
+        ...updated[quickAddItemTargetIndex],
+        maHang: itemPayload.code
+      };
+      setInvoiceItems(updated);
+    }
+
+    // Reset quick add inputs
+    setNewItemCode('');
+    setNewItemName('');
+    setNewItemUnit('Cuộn');
+    setNewItemAccount('152');
+    setNewItemOpeningQty(0);
+    setNewItemOpeningValue(0);
+    setQuickAddItemError('');
+    setShowQuickAddItem(false);
+    setQuickAddItemTargetIndex(null);
+  };
 
   const handleQuickAddPartnerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -747,14 +813,39 @@ export default function NhapLieu() {
                   <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3.5 bg-slate-50/50 p-3 rounded-xl border border-slate-150 items-end">
                     {/* Select item code */}
                     <div className="md:col-span-3 space-y-1 font-sans">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase">Mã hàng hóa vật tư</label>
+                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
+                        <span>Mã hàng hóa vật tư</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rand = Math.floor(100 + Math.random() * 900);
+                            setNewItemCode(`VT-${rand}`);
+                            setQuickAddItemTargetIndex(idx);
+                            setShowQuickAddItem(true);
+                          }}
+                          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                          id={`quick-add-item-trigger-${idx}`}
+                        >
+                          + Mới
+                        </button>
+                      </div>
                       <select
                         required
                         value={line.maHang}
-                        onChange={(e) => handleUpdateInvoiceItem(idx, 'maHang', e.target.value)}
-                        className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs"
+                        onChange={(e) => {
+                          if (e.target.value === '__add_new_item__') {
+                            const rand = Math.floor(100 + Math.random() * 900);
+                            setNewItemCode(`VT-${rand}`);
+                            setQuickAddItemTargetIndex(idx);
+                            setShowQuickAddItem(true);
+                          } else {
+                            handleUpdateInvoiceItem(idx, 'maHang', e.target.value);
+                          }
+                        }}
+                        className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-bold text-slate-850"
                       >
                         <option value="">-- Chọn hàng hóa --</option>
+                        <option value="__add_new_item__" className="text-indigo-650 font-bold">+ Khai báo vật tư mới...</option>
                         {items.map(i => (
                           <option key={i.code} value={i.code}>{i.code} - {i.name}</option>
                         ))}
@@ -990,6 +1081,158 @@ export default function NhapLieu() {
                   type="submit"
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer flex items-center gap-1 shadow-sm"
                   id="btn-quick-add-submit"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Đăng ký & Chọn
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* QUICK ADD INVENTORY ITEM MODAL DIALOG */}
+      {showQuickAddItem && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in" id="modal-quick-add-item">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <PlusCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Đăng ký Vật tư / Hàng hóa mới</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Bổ sung nhanh mã danh mục vật tư hàng hóa vào kho</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQuickAddItem(false);
+                  setQuickAddItemError('');
+                  setQuickAddItemTargetIndex(null);
+                }}
+                className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-650 rounded-xl transition cursor-pointer"
+                id="btn-close-quickadd-item"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleQuickAddItemSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+              {quickAddItemError && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-650 flex items-center gap-1.5 font-medium animate-pulse">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{quickAddItemError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Mã vật tư <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: CHIPOLY.400"
+                    value={newItemCode}
+                    onChange={(e) => {
+                      setNewItemCode(e.target.value.toUpperCase());
+                      setQuickAddItemError('');
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-550 font-bold"
+                  />
+                  <span className="text-[9px] text-slate-400 block font-normal">Duy nhất, viết liền không dấu</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Tài khoản kho hạch toán</label>
+                  <select
+                    value={newItemAccount}
+                    onChange={(e) => setNewItemAccount(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-300 font-medium"
+                  >
+                    <option value="152">152 - Nguyên liệu, vật liệu</option>
+                    <option value="156">156 - Hàng hóa</option>
+                    <option value="155">155 - Thành phẩm</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Tên vật tư / Hàng hóa <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: Chỉ may Polyester 40/2 bền chắc"
+                    value={newItemName}
+                    onChange={(e) => {
+                      setNewItemName(e.target.value);
+                      setQuickAddItemError('');
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-300"
+                  />
+                </div>
+
+                <div className="col-span-1 space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Đơn vị tính <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: Cuộn, Mét, Kg"
+                    value={newItemUnit}
+                    onChange={(e) => {
+                      setNewItemUnit(e.target.value);
+                      setQuickAddItemError('');
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-300"
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3 mt-1 grid grid-cols-2 gap-3 bg-slate-50 p-2.5 rounded-xl">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase block">Số lượng đầu kỳ</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newItemOpeningQty}
+                    onChange={(e) => setNewItemOpeningQty(Math.abs(Number(e.target.value)))}
+                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-[11px] text-right font-mono text-emerald-800"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase block">Giá trị tồn đầu kỳ (vnđ)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newItemOpeningValue}
+                    onChange={(e) => setNewItemOpeningValue(Math.abs(Number(e.target.value)))}
+                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-[11px] text-right font-mono text-indigo-800"
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2.5 pt-4 border-t border-slate-100 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickAddItem(false);
+                    setQuickAddItemError('');
+                    setQuickAddItemTargetIndex(null);
+                  }}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-lg text-xs transition cursor-pointer"
+                  id="btn-quick-add-item-cancel"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer flex items-center gap-1 shadow-sm"
+                  id="btn-quick-add-item-submit"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Đăng ký & Chọn

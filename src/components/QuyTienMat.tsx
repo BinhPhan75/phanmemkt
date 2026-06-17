@@ -25,6 +25,7 @@ export default function QuyTienMat() {
   const [formReciprocalAcc, setFormReciprocalAcc] = useState('');
   const [formAmount, setFormAmount] = useState<number | ''>('');
   const [formDescription, setFormDescription] = useState('');
+  const [formVoucherNo, setFormVoucherNo] = useState('');
 
   // Quick Add Partner states
   const [showQuickAddPartner, setShowQuickAddPartner] = useState(false);
@@ -90,6 +91,7 @@ export default function QuyTienMat() {
     }
 
     setFormAmount('');
+    setFormVoucherNo('');
     setFormDescription(
       type === 'PT' ? 'Thu tiền bán hàng / Khách hàng thanh toán' :
       type === 'PC' ? 'Chi thanh toán tiền hàng cho Nhà cung cấp' :
@@ -107,7 +109,27 @@ export default function QuyTienMat() {
     }
 
     const typePrefix = voucherType;
-    const generatedNo = generateVoucherNo(typePrefix);
+    let finalVoucherNo = '';
+
+    if (typePrefix === 'BC' || typePrefix === 'BN') {
+      if (!formVoucherNo.trim()) {
+        alert('Vui lòng nhập số giao dịch của ngân hàng!');
+        return;
+      }
+      finalVoucherNo = formVoucherNo.trim().toUpperCase();
+      
+      // Check duplicate
+      const duplicated = transactions.some((tx: any) => {
+        const code = tx.type === 'HOADON' ? tx.soHD : tx.soCT;
+        return code && code.toUpperCase() === finalVoucherNo;
+      });
+      if (duplicated) {
+        alert(`Số chứng từ/giao dịch "${finalVoucherNo}" đã tồn tại trên hệ thống. Vui lòng nhập số khác!`);
+        return;
+      }
+    } else {
+      finalVoucherNo = generateVoucherNo(typePrefix);
+    }
 
     const isReceipt = (typePrefix === 'PT' || typePrefix === 'BC');
     const cashOrBankAcc = selectedAcc === '111' ? '111' : '112';
@@ -119,7 +141,7 @@ export default function QuyTienMat() {
       type: 'PHIEUKT',
       ngayCT: formDate,
       ngayGS: formDate,
-      soCT: generatedNo,
+      soCT: finalVoucherNo,
       maKH: formPartnerCode,
       dienGiai: formDescription,
       lines: [
@@ -146,7 +168,7 @@ export default function QuyTienMat() {
 
     addTransaction(newTx);
     setShowVoucherModal(false);
-    alert(`Đã lập thành công chứng từ ${generatedNo}!`);
+    alert(`Đã lập thành công chứng từ ${finalVoucherNo}!`);
   };
 
   // Derive ledger lines (Cash or Bank)
@@ -580,16 +602,34 @@ export default function QuyTienMat() {
             {/* Form */}
             <form onSubmit={handleAddVoucherSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                  Số Chứng Từ (Số Phiếu Tự Sinh):
-                </label>
-                <input
-                  type="text"
-                  readOnly
-                  disabled
-                  value={`${generateVoucherNo(voucherType)} (Tự sinh khi lưu)`}
-                  className="w-full px-3 py-2 text-xs font-mono font-bold bg-slate-100 text-slate-600 rounded-lg border border-slate-200"
-                />
+                {voucherType === 'BC' || voucherType === 'BN' ? (
+                  <>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                      Số Giao Dịch Ngân Hàng (Nhập Tay):
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formVoucherNo}
+                      onChange={(e) => setFormVoucherNo(e.target.value)}
+                      placeholder="Nhập số tham chiếu / mã giao dịch ngân hàng..."
+                      className="w-full px-3 py-2 text-xs font-mono font-bold bg-white text-slate-800 rounded-lg border border-slate-200 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                      Số Chứng Từ (Số Phiếu Tự Sinh):
+                    </label>
+                    <input
+                      type="text"
+                      readOnly
+                      disabled
+                      value={`${generateVoucherNo(voucherType)} (Tự sinh khi lưu)`}
+                      className="w-full px-3 py-2 text-xs font-mono font-bold bg-slate-100 text-slate-600 rounded-lg border border-slate-200"
+                    />
+                  </>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

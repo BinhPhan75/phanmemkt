@@ -10,11 +10,12 @@ import { FileText, Printer, Search, Calendar, FileCheck, RefreshCw } from 'lucid
 
 export default function InAnSoSach() {
   const { transactions, accounts, partners } = useAccounting();
-  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT' | 'SCT_131' | 'SCT_331' | 'TH_131' | 'TH_331'>('NKC');
+  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT' | 'SCT_131' | 'SCT_331' | 'TH_131' | 'TH_331' | 'CTGS'>('NKC');
   const [selectedAccCode, setSelectedAccCode] = useState<string>('1121'); // default to 1121 as requested
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('131-BINHMINH'); // default customer partner
   const [startDate, setStartDate] = useState('2026-06-01');
   const [endDate, setEndDate] = useState('2026-06-30');
+  const [ctgsDirection, setCtgsDirection] = useState<'CO' | 'NO'>('CO');
 
   // Calculate account balances up to (excluding) startDate to compute true Opening Balance for the period
   const getTrueOpeningBalanceForAccount = (accCode: string) => {
@@ -534,6 +535,78 @@ export default function InAnSoSach() {
 
   const doubleEntries = getDoubleEntries();
 
+  // Calculate dynamic "Chứng từ ghi sổ" structures for our customized CTGS printing template
+  const getCtgsData = () => {
+    const inRangeEntries = doubleEntries.filter(e => e.date >= startDate && e.date <= endDate);
+    const matchesMain = (acc: string) => acc === selectedAccCode || acc.startsWith(selectedAccCode);
+    const isCreditMain = ctgsDirection === 'CO';
+
+    const mainEntries = inRangeEntries.filter(e => {
+      return isCreditMain ? matchesMain(e.creditAcc) : matchesMain(e.debitAcc);
+    });
+
+    const offsetAccSet = new Set<string>();
+    mainEntries.forEach(e => {
+      const offset = isCreditMain ? e.debitAcc : e.creditAcc;
+      if (offset) offsetAccSet.add(offset);
+    });
+    const offsetAccounts = Array.from(offsetAccSet).sort();
+
+    const detailRowMap: Record<string, {
+      date: string;
+      docNo: string;
+      description: string;
+      values: Record<string, number>;
+      total: number;
+    }> = {};
+
+    mainEntries.forEach(e => {
+      const key = `${e.date}_${e.docNo}`;
+      const offset = isCreditMain ? e.debitAcc : e.creditAcc;
+      if (!detailRowMap[key]) {
+        detailRowMap[key] = {
+          date: e.date,
+          docNo: e.docNo,
+          description: e.description,
+          values: {},
+          total: 0
+        };
+      }
+      detailRowMap[key].values[offset] = (detailRowMap[key].values[offset] || 0) + e.amount;
+      detailRowMap[key].total += e.amount;
+    });
+
+    const detailRows = Object.values(detailRowMap).sort((a, b) => a.date.localeCompare(b.date) || a.docNo.localeCompare(b.docNo));
+
+    const summaryRows = offsetAccounts.map(offset => {
+      const matchingEntries = mainEntries.filter(e => {
+        const oInput = isCreditMain ? e.debitAcc : e.creditAcc;
+        return oInput === offset;
+      });
+
+      const totalAmount = matchingEntries.reduce((sum, e) => sum + e.amount, 0);
+      const targetAcc = accounts.find(a => a.code === offset);
+      const description = `Ghi nhận đối ứng TK ${offset} - ${targetAcc?.name || ''}`;
+
+      return {
+        description,
+        debitAcc: isCreditMain ? offset : selectedAccCode,
+        creditAcc: isCreditMain ? selectedAccCode : offset,
+        amount: totalAmount,
+        note: `${offset}_CTGS`
+      };
+    });
+
+    const totalSum = summaryRows.reduce((s, r) => s + r.amount, 0);
+
+    return {
+      offsetAccounts,
+      detailRows,
+      summaryRows,
+      totalSum
+    };
+  };
+
   // Create General Ledger (Sổ Cái) lines for the selected account
   const getGeneralLedgerData = () => {
     const acc = accounts.find(a => a.code === selectedAccCode);
@@ -654,6 +727,19 @@ export default function InAnSoSach() {
               >
                 Sổ Chi Tiết TK
               </button>
+              <button
+                onClick={() => {
+                  setSelectedBook('CTGS');
+                  setSelectedAccCode('331');
+                  setCtgsDirection('CO');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'CTGS' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-ctgs"
+              >
+                Chứng từ ghi sổ (CTGS)
+              </button>
             </div>
           </div>
 
@@ -730,7 +816,7 @@ export default function InAnSoSach() {
             />
           </div>
 
-          {(selectedBook === 'SOCAI' || selectedBook === 'SCT') && (
+          {(selectedBook === 'SOCAI' || selectedBook === 'SCT' || selectedBook === 'CTGS') && (
             <div className="flex flex-col">
               <label className="text-xs font-semibold text-slate-500 mb-1">Chọn tài khoản xem Sổ</label>
               <select
@@ -744,6 +830,21 @@ export default function InAnSoSach() {
                     {acc.code} - {acc.name}
                   </option>
                 ))}
+              </select>
+            </div>
+          )}
+
+          {selectedBook === 'CTGS' && (
+            <div className="flex flex-col">
+              <label className="text-xs font-semibold text-slate-500 mb-1">Cơ chế kết chuyển đối ứng</label>
+              <select
+                value={ctgsDirection}
+                onChange={(e) => setCtgsDirection(e.target.value as 'CO' | 'NO')}
+                className="px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-800 font-bold focus:outline-none focus:border-indigo-600"
+                id="select-ctgs-direction"
+              >
+                <option value="CO">Lấy các phát sinh GHI CÓ của TK {selectedAccCode}</option>
+                <option value="NO">Lấy các phát sinh GHI NỢ của TK {selectedAccCode}</option>
               </select>
             </div>
           )}
@@ -1245,6 +1346,209 @@ export default function InAnSoSach() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 5F. CHỨNG TỪ GHI SỔ (CTGS) */}
+      {selectedBook === 'CTGS' && (() => {
+        const data = getCtgsData();
+        const mainAccName = accounts.find(a => a.code === selectedAccCode)?.name || '';
+        const isCreditMain = ctgsDirection === 'CO';
+        const yearStr = startDate ? startDate.substring(0, 4) : '2026';
+
+        return (
+          <div className="space-y-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm animate-fade-in" id="ctgs-print-sheet">
+            {/* Header / Info Block */}
+            <div className="relative text-center border-b border-dashed border-slate-200 pb-6">
+              <div className="absolute top-0 left-0 text-left space-y-0.5 hidden sm:block">
+                <p className="text-[10px] font-black tracking-wider uppercase text-slate-400">Đơn vị: CT CP Dệt may Việt Nam</p>
+                <p className="text-[10px] font-bold text-slate-400">Địa chỉ: Hòa Khánh, Liên Chiểu, Đà Nẵng</p>
+              </div>
+
+              <div className="absolute top-0 right-0 text-right space-y-0.5 hidden sm:block">
+                <p className="text-[10px] border border-slate-200 font-bold px-2 py-0.5 rounded text-slate-500 w-fit ml-auto">Mẫu số S11-DN</p>
+                <p className="text-[9px] text-slate-400 italic">(Ban hành theo TT số 133/2016/TT-BTC)</p>
+              </div>
+
+              <div className="pt-8">
+                <h3 className="text-2xl font-black text-slate-800 tracking-wide uppercase">CHỨNG TỪ GHI SỔ</h3>
+                <p className="text-sm font-bold text-indigo-700 mt-1">Số hạch toán: CTGS/{selectedAccCode}/{yearStr}</p>
+                <p className="text-xs text-slate-500 italic mt-0.5">Kỳ sổ sách hạch toán: từ {startDate} đến {endDate}</p>
+              </div>
+            </div>
+
+            {/* PART 1: PHẦN TỔNG HỢP GOM THEO TK ĐỐI ỨNG (Upper Table) */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 border-l-4 border-indigo-600 pl-3">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">
+                  I. PHẦN TỔNG HỢP GOM THEO TÀI KHOẢN ĐỐI ỨNG
+                </h4>
+                <span className="text-[9px] bg-indigo-50 text-indigo-700 font-black px-1.5 py-0.5 rounded-sm uppercase">Tổng hợp</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse border border-slate-200 text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] text-center border-b border-slate-300">
+                      <th className="py-2.5 px-4 border border-slate-200 text-left">Diễn giải nội dung hạch toán</th>
+                      <th className="py-2.5 px-4 border border-slate-200 w-32">Nợ TK (Debit)</th>
+                      <th className="py-2.5 px-4 border border-slate-200 w-32">Có TK (Credit)</th>
+                      <th className="py-2.5 px-4 border border-slate-200 text-right w-44">Số tiền hạch toán</th>
+                      <th className="py-2.5 px-4 border border-slate-200 w-32 text-center text-slate-400">Ghi chú</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-150 text-slate-700 font-semibold">
+                    {data.summaryRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-400 font-normal bg-slate-50/20">
+                          Chưa phát sinh bất kỳ nghiệp vụ kinh tế nào khớp với điều kiện lọc hạch toán của tài khoản này!
+                        </td>
+                      </tr>
+                    ) : (
+                      data.summaryRows.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition">
+                          <td className="py-2.5 px-4 border border-slate-200 text-slate-600 font-normal">{row.description}</td>
+                          <td className="py-2.5 px-4 border border-slate-200 font-mono font-bold text-center text-indigo-600 bg-indigo-50/10">{row.debitAcc}</td>
+                          <td className="py-2.5 px-4 border border-slate-200 font-mono font-bold text-center text-emerald-600 bg-emerald-50/10">{row.creditAcc}</td>
+                          <td className="py-2.5 px-4 border border-slate-200 text-right font-mono font-bold text-slate-800">
+                            {row.amount.toLocaleString()} đ
+                          </td>
+                          <td className="py-2.5 px-4 border border-slate-200 text-center text-[10px] font-mono text-slate-400">{row.note}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {data.summaryRows.length > 0 && (
+                    <tfoot className="font-extrabold bg-slate-50 font-mono text-[11px] text-slate-800 border-t border-slate-300">
+                      <tr>
+                        <td colSpan={3} className="py-3 px-4 border border-slate-200 text-right font-serif text-slate-500 font-bold">TỔNG CỘNG HOẠT ĐỘNG PHÁT SINH (PART I):</td>
+                        <td className="py-3 px-4 border border-slate-200 text-right text-indigo-800 font-black text-sm bg-indigo-50/30">
+                          {data.totalSum.toLocaleString()} đ
+                        </td>
+                        <td className="py-3 px-4 border border-slate-200 text-center text-slate-400">x</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+            {/* PART 2: PHẦN CHI TIẾT TÀI KHOẢN ĐỐI ỨNG (Lower Table) */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 border-l-4 border-indigo-600 pl-3">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest">
+                  II. PHẦN CHI TIẾT THEO TÀI KHOẢN ĐỐI ỨNG
+                </h4>
+                <span className="text-[9px] bg-indigo-50 text-indigo-700 font-black px-1.5 py-0.5 rounded-sm uppercase">Chi tiết</span>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-700 space-y-1">
+                <p className="text-[11px] uppercase font-bold text-indigo-900 leading-normal">
+                  {isCreditMain ? (
+                    `TÀI KHOẢN ĐỐI ỨNG, GHI CÓ TK ${selectedAccCode} (${mainAccName}), GHI NỢ CÁC TK:`
+                  ) : (
+                    `TÀI KHOẢN ĐỐI ỨNG, GHI NỢ TK ${selectedAccCode} (${mainAccName}), GHI CÓ CÁC TK:`
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1 font-mono text-[10px] text-slate-505">
+                  <span className="font-medium text-slate-500">Các TK đối ứng trong kỳ hạch toán:</span>
+                  {data.offsetAccounts.map(o => (
+                    <span key={o} className="bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold px-1 rounded">{o}</span>
+                  ))}
+                  {data.offsetAccounts.length === 0 && <span className="italic text-slate-400">Không có đối ứng nào</span>}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse border border-slate-200 text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] text-center border-b border-slate-300">
+                      <th className="py-2.5 px-3 border border-slate-200 w-28 text-center">Ngày hạch toán</th>
+                      <th className="py-2.5 px-3 border border-slate-200 w-28 text-center">Số chứng từ</th>
+                      <th className="py-2.5 px-4 border border-slate-200 text-left">Diễn giải nội dung hạch toán chi tiết</th>
+                      {data.offsetAccounts.map(acc => (
+                        <th key={acc} className="py-2.5 px-3 border border-slate-200 font-mono text-[10px] text-indigo-700 w-24">
+                          TK {acc}
+                        </th>
+                      ))}
+                      <th className="py-2.5 px-3 border border-slate-200 text-right w-28 font-semibold">Tổng cộng (đ)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-150 text-slate-755 font-semibold">
+                    {data.detailRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={data.offsetAccounts.length + 4} className="py-12 text-center text-slate-400 font-normal bg-slate-50/20">
+                          Chưa phát sinh bất kỳ nghiệp vụ chi tiết nào trong kỳ hạch toán tương ứng!
+                        </td>
+                      </tr>
+                    ) : (
+                      data.detailRows.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition">
+                          <td className="py-2.5 px-3 border border-slate-200 text-center font-mono text-slate-500">{row.date}</td>
+                          <td className="py-2.5 px-3 border border-slate-200 text-center font-bold text-slate-800">{row.docNo}</td>
+                          <td className="py-2.5 px-4 border border-slate-200 font-normal text-slate-600 max-w-xs truncate">{row.description}</td>
+                          {data.offsetAccounts.map(acc => {
+                            const val = row.values[acc] || 0;
+                            return (
+                              <td key={acc} className="py-2.5 px-3 border border-slate-200 text-right font-mono text-slate-650">
+                                {val > 0 ? val.toLocaleString() : '-'}
+                              </td>
+                            );
+                          })}
+                          <td className="py-2.5 px-3 border border-slate-200 text-right font-mono font-black text-indigo-700 bg-indigo-50/10">
+                            {row.total.toLocaleString()}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  {data.detailRows.length > 0 && (
+                    <tfoot className="font-extrabold bg-slate-50 font-mono text-[11px] text-slate-800 border-t border-slate-300">
+                      <tr>
+                        <td colSpan={3} className="py-3 px-4 border border-slate-200 text-right font-serif text-slate-500 font-bold">CỘNG TỔNG CÁC PHÁT SINH (PART II):</td>
+                        {data.offsetAccounts.map(acc => {
+                          const colTotal = data.detailRows.reduce((sum, r) => sum + (r.values[acc] || 0), 0);
+                          return (
+                            <td key={acc} className="py-3 px-3 border border-slate-200 text-right text-indigo-700 bg-indigo-50/5">
+                              {colTotal.toLocaleString()} đ
+                            </td>
+                          );
+                        })}
+                        <td className="py-3 px-3 border border-slate-200 text-right text-indigo-800 font-black text-sm bg-indigo-50/20">
+                          {data.totalSum.toLocaleString()} đ
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+
+            {/* Signature Block */}
+            <div className="grid grid-cols-3 gap-4 pt-12 text-center text-xs font-semibold text-slate-700">
+              <div className="space-y-16">
+                <p className="font-bold uppercase tracking-widest text-slate-400 text-[10px]">Người lập phiếu</p>
+                <div>
+                  <p className="font-black text-slate-800 text-sm">Vũ Thị Lan</p>
+                  <p className="text-[10px] text-slate-400 italic font-normal">(Ký, ghi rõ họ tên)</p>
+                </div>
+              </div>
+              <div className="space-y-16">
+                <p className="font-bold uppercase tracking-widest text-slate-400 text-[10px]">Kế toán trưởng</p>
+                <div>
+                  <p className="font-black text-slate-800 text-sm">Phan Như Bình</p>
+                  <p className="text-[10px] text-slate-400 italic font-normal">(Ký, ghi rõ họ tên)</p>
+                </div>
+              </div>
+              <div className="space-y-16">
+                <p className="font-bold uppercase tracking-widest text-slate-400 text-[10px]">Giám đốc kiểm duyệt</p>
+                <div>
+                  <p className="font-black text-slate-800 text-sm">Phạm Hoàng Nam</p>
+                  <p className="text-[10px] text-slate-400 italic font-normal">(Ký, đóng dấu tròn)</p>
+                </div>
+              </div>
             </div>
           </div>
         );

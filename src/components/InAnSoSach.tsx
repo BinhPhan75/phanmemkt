@@ -10,8 +10,9 @@ import { FileText, Printer, Search, Calendar, FileCheck, RefreshCw } from 'lucid
 
 export default function InAnSoSach() {
   const { transactions, accounts, partners } = useAccounting();
-  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT'>('NKC');
+  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT' | 'SCT_131' | 'SCT_331' | 'TH_131' | 'TH_331'>('NKC');
   const [selectedAccCode, setSelectedAccCode] = useState<string>('1121'); // default to 1121 as requested
+  const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('131-BINHMINH'); // default customer partner
   const [startDate, setStartDate] = useState('2026-06-01');
   const [endDate, setEndDate] = useState('2026-06-30');
 
@@ -279,6 +280,142 @@ export default function InAnSoSach() {
 
   const sctData = getDetailedLedgerData();
 
+  // Calculate specific partner's opening balance up to (excluding) startDate
+  const getPartnerOpeningBalance = (partnerCode: string, accCode: '131' | '331') => {
+    const partner = partners.find((p: any) => p.code === partnerCode);
+    let openingDebit = 0;
+    let openingCredit = 0;
+
+    if (partner) {
+      openingDebit = partner.openingDebit || 0;
+      openingCredit = partner.openingCredit || 0;
+    }
+
+    // Get all transactions BEFORE startDate
+    transactions.forEach(tx => {
+      const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+      if (dbDate >= startDate) return;
+
+      const isTxThisPartner = (tx.type === 'HOADON' && tx.maKH === partnerCode) ||
+                             (tx.type === 'PHIEUKT' && tx.maKH === partnerCode);
+      if (!isTxThisPartner) return;
+
+      if (tx.type === 'HOADON') {
+        const totalBase = tx.items.reduce((s, i) => s + i.thanhTien, 0);
+        const totalTax = tx.items.reduce((s, i) => s + i.tienThue, 0);
+        const totalValue = totalBase + totalTax;
+
+        if (accCode === '131' && tx.loaiHD === 'BR') {
+          openingDebit += totalValue;
+        } else if (accCode === '331' && tx.loaiHD === 'MV') {
+          openingCredit += totalValue;
+        }
+      } else {
+        // Journal Voucher (PHIEUKT)
+        tx.lines.forEach(l => {
+          if (l.soTK === accCode || l.soTK.startsWith(accCode)) {
+            openingDebit += l.psNo;
+            openingCredit += l.psCo;
+          }
+        });
+      }
+    });
+
+    return { openingDebit, openingCredit };
+  };
+
+  // Generate detailed rows with real-time running balance for Sổ Chi Tiết Công Nợ Phải Thu/Phải Trả
+  const getPartnerDetailRows = (partnerCode: string, accCode: '131' | '331') => {
+    const { openingDebit, openingCredit } = getPartnerOpeningBalance(partnerCode, accCode);
+    let runningBalance = accCode === '131' ? (openingDebit - openingCredit) : (openingCredit - openingDebit);
+
+    const rows: any[] = [];
+
+    // Filter transactions inside the date range and extract double entries matching partner
+    transactions.forEach(tx => {
+      const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+      if (dbDate < startDate || dbDate > endDate) return;
+
+      const isTxThisPartner = (tx.type === 'HOADON' && tx.maKH === partnerCode) ||
+                             (tx.type === 'PHIEUKT' && tx.maKH === partnerCode);
+      if (!isTxThisPartner) return;
+
+      if (tx.type === 'HOADON') {
+        const totalBase = tx.items.reduce((s, i) => s + i.thanhTien, 0);
+        const totalTax = tx.items.reduce((s, i) => s + i.tienThue, 0);
+        const totalValue = totalBase + totalTax;
+
+        if (accCode === '131' && tx.loaiHD === 'BR') {
+          rows.push({
+            date: dbDate,
+            docNo: tx.soHD,
+            description: tx.dienGiai,
+            recAcc: tx.tkCo || '511',
+            debit: totalValue,
+            credit: 0
+          });
+        } else if (accCode === '331' && tx.loaiHD === 'MV') {
+          rows.push({
+            date: dbDate,
+            docNo: tx.soHD,
+            description: tx.dienGiai,
+            recAcc: tx.tkNo || '152',
+            debit: 0,
+            credit: totalValue
+          });
+        }
+      } else {
+        // Journal Voucher (PHIEUKT)
+        tx.lines.forEach(l => {
+          if (l.soTK === accCode || l.soTK.startsWith(accCode)) {
+            const correspondingLines = tx.lines.filter(oth => oth.loaiTK !== l.loaiTK);
+            const corAcc = correspondingLines.map(c => c.soTK).join('/');
+            
+            rows.push({
+              date: dbDate,
+              docNo: tx.soCT,
+              description: l.dienGiai || tx.dienGiai,
+              recAcc: corAcc || '111',
+              debit: l.psNo,
+              credit: l.psCo
+            });
+          }
+        });
+      }
+    });
+
+    // Sort by date
+    rows.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Compute running values step-by-step
+    const calculatedRows = rows.map(e => {
+      if (accCode === '131') {
+        runningBalance += e.debit - e.credit;
+      } else {
+        runningBalance += e.credit - e.debit;
+      }
+      return {
+        ...e,
+        balance: runningBalance
+      };
+    });
+
+    const initialBalance = accCode === '131' ? (openingDebit - openingCredit) : (openingCredit - openingDebit);
+    const totalDebit = rows.reduce((s, r) => s + r.debit, 0);
+    const totalCredit = rows.reduce((s, r) => s + r.credit, 0);
+    const finalBalance = runningBalance;
+
+    return {
+      rows: calculatedRows,
+      initialDebit: openingDebit,
+      initialCredit: openingCredit,
+      initialBalance,
+      totalDebit,
+      totalCredit,
+      finalBalance
+    };
+  };
+
   // Decompose all transactions into individual double-entry bookkeeping lines
   // Returns: { date, docNo, description, debitAcc, creditAcc, amount }
   const getDoubleEntries = (): Array<{
@@ -481,39 +618,93 @@ export default function InAnSoSach() {
         </div>
 
         {/* Book switcher */}
-        <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
-          <button
-            onClick={() => setSelectedBook('NKC')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
-              selectedBook === 'NKC' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-            }`}
-            id="switch-book-nkc"
-          >
-            Nhật Ký Chung (NKC)
-          </button>
-          <button
-            onClick={() => setSelectedBook('SOCAI')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
-              selectedBook === 'SOCAI' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-            }`}
-            id="switch-book-socai"
-          >
-            Sổ Cái Tài Khoản
-          </button>
-          <button
-            onClick={() => {
-              setSelectedBook('SCT');
-              if (selectedAccCode === '111') {
-                setSelectedAccCode('1121'); // default to cash in bank for high fidelity
-              }
-            }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
-              selectedBook === 'SCT' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
-            }`}
-            id="switch-book-sct"
-          >
-            Sổ Chi Tiết Tài Khoản (SCT)
-          </button>
+        <div className="flex flex-col xl:flex-row gap-4 bg-slate-150/40 p-2.5 rounded-2xl border border-slate-200 w-full xl:w-auto">
+          <div className="space-y-1">
+            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">I. Sổ hạch toán tổng hợp</span>
+            <div className="flex bg-white/60 p-1 rounded-xl gap-1 flex-wrap">
+              <button
+                onClick={() => setSelectedBook('NKC')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'NKC' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-nkc"
+              >
+                Nhật Ký Chung
+              </button>
+              <button
+                onClick={() => setSelectedBook('SOCAI')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'SOCAI' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-socai"
+              >
+                Sổ Cái TK
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedBook('SCT');
+                  if (selectedAccCode === '111') {
+                    setSelectedAccCode('1121');
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'SCT' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-sct"
+              >
+                Sổ Chi Tiết TK
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">II. Sổ sách & báo cáo công nợ</span>
+            <div className="flex bg-white/60 p-1 rounded-xl gap-1 flex-wrap">
+              <button
+                onClick={() => {
+                  setSelectedBook('SCT_131');
+                  setSelectedPartnerCode('131-BINHMINH');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'SCT_131' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-sct131"
+              >
+                Sổ CT Phải Thu (131)
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedBook('SCT_331');
+                  const vend = partners.find(p => p.type === 'VENDOR' || p.type === 'BOTH');
+                  setSelectedPartnerCode(vend?.code || '331-HOALAM');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'SCT_331' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-sct331"
+              >
+                Sổ CT Phải Trả (331)
+              </button>
+              <button
+                onClick={() => setSelectedBook('TH_131')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'TH_131' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-th131"
+              >
+                T.Hợp Phải Thu (131)
+              </button>
+              <button
+                onClick={() => setSelectedBook('TH_331')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  selectedBook === 'TH_331' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+                id="switch-book-th331"
+              >
+                T.Hợp Phải Trả (331)
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -526,7 +717,7 @@ export default function InAnSoSach() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800"
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800 font-bold"
             />
           </div>
           <div className="flex flex-col">
@@ -535,7 +726,7 @@ export default function InAnSoSach() {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800"
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800 font-bold"
             />
           </div>
 
@@ -553,6 +744,30 @@ export default function InAnSoSach() {
                     {acc.code} - {acc.name}
                   </option>
                 ))}
+              </select>
+            </div>
+          )}
+
+          {(selectedBook === 'SCT_131' || selectedBook === 'SCT_331') && (
+            <div className="flex flex-col">
+              <label className="text-xs font-semibold text-slate-500 mb-1">Chọn đối tác hạch toán</label>
+              <select
+                value={selectedPartnerCode}
+                onChange={(e) => setSelectedPartnerCode(e.target.value)}
+                className="px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm text-slate-850 font-bold focus:outline-none focus:border-indigo-600"
+                id="select-debt-partner"
+              >
+                {partners
+                  .filter(p => {
+                    if (selectedBook === 'SCT_131') return p.type === 'CUSTOMER' || p.type === 'BOTH';
+                    return p.type === 'VENDOR' || p.type === 'BOTH';
+                  })
+                  .map(p => (
+                    <option key={p.code} value={p.code}>
+                      {p.code} - {p.name}
+                    </option>
+                  ))
+                }
               </select>
             </div>
           )}
@@ -836,6 +1051,204 @@ export default function InAnSoSach() {
           </div>
         </div>
       )}
+
+      {/* 5D. SỔ CHI TIẾT CÔNG NỢ 131 OR 331 */}
+      {(selectedBook === 'SCT_131' || selectedBook === 'SCT_331') && (() => {
+        const accCode = selectedBook === 'SCT_131' ? '131' : '331';
+        const data = getPartnerDetailRows(selectedPartnerCode, accCode);
+        const partnerName = partners.find((p: any) => p.code === selectedPartnerCode)?.name || '';
+        
+        return (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden animate-fade-in" id="partner-sct-print-sheet">
+            <div className="p-6 border-b border-indigo-100 bg-indigo-50/10 text-center space-y-1">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-wider">
+                SỔ CHI TIẾT CÔNG NỢ {accCode === '131' ? 'PHẢI THU' : 'PHẢI TRẢ'}
+              </h3>
+              <p className="text-xs font-mono font-bold text-indigo-700">Tài khoản hạch toán: {accCode} • Đối tác: {selectedPartnerCode} - {partnerName}</p>
+              <p className="text-xs text-slate-500 italic">Kỳ sổ sách: từ {startDate} đến {endDate}</p>
+            </div>
+
+            <div className="overflow-x-auto text-xs">
+              <table className="w-full text-left border-collapse border border-slate-200">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px] text-center">
+                    <th className="py-2.5 px-3 border border-slate-200 w-24">Ngày HT</th>
+                    <th className="py-2.5 px-3 border border-slate-200 w-24">Ngày CT</th>
+                    <th className="py-2.5 px-3 border border-slate-200 w-24">Số CT</th>
+                    <th className="py-2.5 px-4 border border-slate-200 text-left">Diễn giải nội dung hạch toán</th>
+                    <th className="py-2.5 px-2 border border-slate-200 w-20">đối ứng</th>
+                    <th className="py-2.5 px-3 border border-slate-200 text-right w-28">Ghi NỢ (+)</th>
+                    <th className="py-2.5 px-3 border border-slate-200 text-right w-28">Ghi CÓ (-)</th>
+                    <th className="py-2.5 px-3 border border-slate-200 text-right w-32">Dư cuối kỳ</th>
+                  </tr>
+                  
+                  {/* Opening Balance Row */}
+                  <tr className="bg-amber-50/40 text-slate-700 font-bold text-[11px]">
+                    <td colSpan={3} className="py-2 px-3 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                    <td className="py-2 px-4 border border-slate-200 italic font-serif">Số dư đầu kỳ hạch toán thực tế:</td>
+                    <td className="py-2 px-2 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                    <td className="py-2 px-3 border border-slate-200 text-right font-mono text-emerald-800">
+                      {accCode === '131' && data.initialBalance >= 0 ? data.initialBalance.toLocaleString() : '-'}
+                    </td>
+                    <td className="py-2 px-3 border border-slate-200 text-right font-mono text-rose-800">
+                      {(accCode === '331' || data.initialBalance < 0) ? Math.abs(data.initialBalance).toLocaleString() : '-'}
+                    </td>
+                    <td className="py-2 px-3 border border-slate-200 text-right font-mono text-indigo-800">
+                      {data.initialBalance.toLocaleString()} đ
+                    </td>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-750 font-semibold">
+                  {data.rows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-12 text-center text-slate-400 font-normal font-sans bg-slate-50/30">
+                        Chưa phát sinh bất kỳ nghiệp vụ kinh tế cụ thể nào với đối tác {selectedPartnerCode} trong thời kỳ lọc sổ.
+                      </td>
+                    </tr>
+                  ) : (
+                    data.rows.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition">
+                        <td className="py-2 px-3 border border-slate-200 text-center font-mono text-slate-500">{row.date}</td>
+                        <td className="py-2 px-3 border border-slate-200 text-center font-mono text-slate-500">{row.date}</td>
+                        <td className="py-2 px-3 border border-slate-200 text-center">
+                          <span className="font-bold text-slate-800 bg-slate-100 px-1 py-0.5 rounded-sm block text-center truncate">{row.docNo}</span>
+                        </td>
+                        <td className="py-2 px-4 border border-slate-200 font-normal text-slate-600 max-w-xs truncate">{row.description}</td>
+                        <td className="py-2 px-2 border border-slate-200 text-center font-mono font-bold text-indigo-600 bg-indigo-50/40">{row.recAcc}</td>
+                        <td className="py-2 px-3 border border-slate-200 text-right font-mono text-emerald-600">
+                          {row.debit > 0 ? row.debit.toLocaleString() : '-'}
+                        </td>
+                        <td className="py-2 px-3 border border-slate-200 text-right font-mono text-rose-600">
+                          {row.credit > 0 ? row.credit.toLocaleString() : '-'}
+                        </td>
+                        <td className="py-2 px-3 border border-slate-200 text-right font-mono font-black text-indigo-700">
+                          {row.balance.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot className="font-bold bg-slate-50 font-mono text-[11px] text-slate-800">
+                  {/* Summary row */}
+                  <tr className="border border-slate-200">
+                    <td colSpan={5} className="py-3 px-4 border border-slate-200 text-right font-serif text-slate-500 text-sm">Cộng phát sinh hạch toán trong kỳ:</td>
+                    <td className="py-3 px-3 border border-slate-200 text-right text-emerald-800 font-black">{data.totalDebit.toLocaleString()} đ</td>
+                    <td className="py-3 px-3 border border-slate-200 text-right text-rose-800 font-black">{data.totalCredit.toLocaleString()} đ</td>
+                    <td className="py-3 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  </tr>
+                  
+                  {/* Closing balance row */}
+                  <tr className="border border-slate-200 bg-indigo-50/20 text-indigo-950">
+                    <td colSpan={5} className="py-3.5 px-4 border border-slate-200 text-right font-serif text-slate-700 text-sm">Số dư cuối kỳ báo cáo kết chuyển:</td>
+                    <td className="py-3.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                    <td className="py-3.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                    <td className="py-3.5 px-3 border border-slate-200 text-right text-indigo-900 font-extrabold text-xs">
+                      {data.finalBalance.toLocaleString()} đ
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 5E. BẢNG TỔNG HỢP CÔNG NỢ */}
+      {(selectedBook === 'TH_131' || selectedBook === 'TH_331') && (() => {
+        const accCode = selectedBook === 'TH_131' ? '131' : '331';
+        
+        // Filter appropriate partners
+        const targetPartners = partners.filter((p: any) => {
+          if (accCode === '131') return p.type === 'CUSTOMER' || p.type === 'BOTH';
+          return p.type === 'VENDOR' || p.type === 'BOTH';
+        });
+
+        const partnersData = targetPartners.map((p: any) => {
+          const detail = getPartnerDetailRows(p.code, accCode);
+          return {
+            partner: p,
+            initialBalance: detail.initialBalance,
+            totalDebit: detail.totalDebit,
+            totalCredit: detail.totalCredit,
+            finalBalance: detail.finalBalance
+          };
+        });
+
+        const totalInitBal = partnersData.reduce((s, p) => s + p.initialBalance, 0);
+        const totalDebits = partnersData.reduce((s, p) => s + p.totalDebit, 0);
+        const totalCredits = partnersData.reduce((s, p) => s + p.totalCredit, 0);
+        const totalFinalBal = partnersData.reduce((s, p) => s + p.finalBalance, 0);
+
+        return (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden animate-fade-in" id="summary-debt-sheet">
+            <div className="p-6 border-b border-indigo-100 bg-indigo-50/10 text-center space-y-1">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-wider">
+                BẢNG TỔNG HỢP CÔNG NỢ {accCode === '131' ? 'PHẢI THU (MÃ TK 131)' : 'PHẢI TRẢ (MÃ TK 331)'}
+              </h3>
+              <p className="text-xs text-slate-500 italic">Kỳ tổng hợp tổng quát doanh nghiệp: từ {startDate} đến {endDate}</p>
+            </div>
+
+            <div className="overflow-x-auto text-xs">
+              <table className="w-full text-left border-collapse border border-slate-200">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[11px] text-center">
+                    <th className="py-3 px-4 border border-slate-200 w-12">STT</th>
+                    <th className="py-3 px-4 border border-slate-200 w-36">Mã đối tác</th>
+                    <th className="py-3 px-6 border border-slate-200 text-left">Tên đơn vị khách hàng / Nhà cung cấp</th>
+                    <th className="py-3 px-4 border border-slate-200 text-right w-36">Dư đầu kỳ (đ)</th>
+                    <th className="py-3 px-4 border border-slate-200 text-right w-36">Lũy kế NỢ (đ)</th>
+                    <th className="py-3 px-4 border border-slate-200 text-right w-36">Lũy kế CÓ (đ)</th>
+                    <th className="py-3 px-4 border border-slate-200 text-right w-36">Dư cuối kỳ (đ)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-755 font-semibold">
+                  {partnersData.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400 font-normal bg-slate-50/30">
+                        Không phát sinh đối tác hoặc đối tượng công nợ nào trong kỳ hạch toán tương ứng.
+                      </td>
+                    </tr>
+                  ) : (
+                    partnersData.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition">
+                        <td className="py-3 px-4 border border-slate-200 text-center font-mono text-slate-400">{idx + 1}</td>
+                        <td className="py-3 px-4 border border-slate-200 font-bold font-mono text-slate-800 text-center">{row.partner.code}</td>
+                        <td className="py-3 px-6 border border-slate-200 font-semibold">{row.partner.name}</td>
+                        <td className={`py-3 px-4 border border-slate-200 text-right font-mono font-bold ${row.initialBalance >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {row.initialBalance.toLocaleString()}
+                        </td>
+                        <td className="py-3 px-4 border border-slate-200 text-right font-mono text-slate-650">
+                          {row.totalDebit > 0 ? row.totalDebit.toLocaleString() : '-'}
+                        </td>
+                        <td className="py-3 px-4 border border-slate-200 text-right font-mono text-slate-650">
+                          {row.totalCredit > 0 ? row.totalCredit.toLocaleString() : '-'}
+                        </td>
+                        <td className={`py-3 px-4 border border-slate-200 text-right font-mono font-black ${row.finalBalance >= 0 ? 'text-indigo-700' : 'text-rose-700'}`}>
+                          {row.finalBalance.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot className="font-extrabold bg-slate-100 font-mono text-[11px] text-slate-850">
+                  {/* Total row */}
+                  <tr className="border border-slate-300">
+                    <td colSpan={3} className="py-3.5 px-6 border border-slate-200 text-right font-serif text-sm">TỔNG CỘNG TOÀN DOANH NGHIỆP:</td>
+                    <td className={`py-3.5 px-4 border border-slate-200 text-right ${totalInitBal >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+                      {totalInitBal.toLocaleString()} đ
+                    </td>
+                    <td className="py-3.5 px-4 border border-slate-200 text-right text-indigo-900">{totalDebits.toLocaleString()} đ</td>
+                    <td className="py-3.5 px-4 border border-slate-200 text-right text-indigo-900">{totalCredits.toLocaleString()} đ</td>
+                    <td className={`py-3.5 px-4 border border-slate-200 text-right text-indigo-950 ${totalFinalBal >= 0 ? 'text-indigo-700' : 'text-rose-700'}`}>
+                      {totalFinalBal.toLocaleString()} đ
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

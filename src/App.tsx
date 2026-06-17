@@ -12,6 +12,7 @@ import KeToanThue from './components/KeToanThue';
 import InAnSoSach from './components/InAnSoSach';
 import BaoCaoTaiChinh from './components/BaoCaoTaiChinh';
 import NhapLieu from './components/NhapLieu';
+import HeThong from './components/HeThong';
 import { getSupabaseConfig, saveSupabaseConfig } from './utils/supabaseService';
 
 import { 
@@ -34,10 +35,11 @@ import {
 
 export default function App() {
   const { 
-    syncWithCloud, 
+    syncWithCloud,
+    currentFiscalYear
   } = useAccounting();
 
-  const [activeTab, setActiveTab] = useState<'QUY' | 'CONG_NO' | 'KHO' | 'THUE' | 'SO_SACH' | 'BCTC' | 'NHAP_LIEU'>('NHAP_LIEU');
+  const [activeTab, setActiveTab] = useState<'QUY' | 'CONG_NO' | 'KHO' | 'THUE' | 'SO_SACH' | 'BCTC' | 'NHAP_LIEU' | 'HE_THONG'>('NHAP_LIEU');
   
   // Supabase Settings overlay drawer state
   const [showSettings, setShowSettings] = useState(false);
@@ -139,7 +141,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
             <h1 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-2">
               Phần mềm Kế toán Doanh nghiệp vừa & nhỏ (TT133)
             </h1>
-            <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase font-mono">Bản quyền hạch toán vĩnh viễn • Niên khóa 2026</p>
+            <p className="text-[10px] text-slate-400 font-semibold tracking-wider uppercase font-mono">Bản quyền hạch toán vĩnh viễn • Niên khóa {currentFiscalYear}</p>
           </div>
         </div>
 
@@ -258,6 +260,17 @@ CREATE TABLE IF NOT EXISTS public.transactions (
             7. Báo cáo tài chính
           </button>
 
+          <button
+            onClick={() => setActiveTab('HE_THONG')}
+            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              activeTab === 'HE_THONG' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
+            }`}
+            id="tab-btn-hethong"
+          >
+            <Settings className="w-4 h-4" />
+            8. Hệ thống
+          </button>
+
         </div>
       </div>
 
@@ -277,6 +290,8 @@ CREATE TABLE IF NOT EXISTS public.transactions (
         {activeTab === 'SO_SACH' && <InAnSoSach />}
 
         {activeTab === 'BCTC' && <BaoCaoTaiChinh />}
+
+        {activeTab === 'HE_THONG' && <HeThong />}
 
       </main>
 

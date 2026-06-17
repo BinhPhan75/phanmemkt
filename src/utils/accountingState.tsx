@@ -27,6 +27,15 @@ interface AccountingState {
   activeModule: string;
   setActiveModule: (module: string) => void;
   
+  fiscalYears: string[];
+  currentFiscalYear: string;
+  closedYears: string[];
+  setCurrentFiscalYear: (year: string) => void;
+  closeYear: (year: string) => void;
+  openNewYear: (year: string) => void;
+  backupDatabase: () => void;
+  restoreDatabase: (data: any) => boolean;
+
   addTransaction: (tx: AccountingTransaction) => void;
   deleteTransaction: (id: string) => void;
   addPartner: (partner: Partner) => void;
@@ -70,9 +79,23 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return saved ? JSON.parse(saved) : DEFAULT_INVENTORIES;
   });
 
-  const [transactions, setTransactions] = useState<AccountingTransaction[]>(() => {
+  const [allTransactions, setAllTransactions] = useState<AccountingTransaction[]>(() => {
     const saved = localStorage.getItem('smartaccount_transactions');
     return saved ? JSON.parse(saved) : DEFAULT_TRANSACTIONS;
+  });
+
+  const [fiscalYears, setFiscalYears] = useState<string[]>(() => {
+    const saved = localStorage.getItem('smartaccount_fiscal_years');
+    return saved ? JSON.parse(saved) : ['2025', '2026', '2027'];
+  });
+
+  const [currentFiscalYear, setCurrentFiscalYear] = useState<string>(() => {
+    return localStorage.getItem('smartaccount_current_fiscal_year') || '2026';
+  });
+
+  const [closedYears, setClosedYears] = useState<string[]>(() => {
+    const saved = localStorage.getItem('smartaccount_closed_years');
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [allocations, setAllocations] = useState<BudgetAllocation[]>(() => {
@@ -102,19 +125,50 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [items]);
 
   useEffect(() => {
-    localStorage.setItem('smartaccount_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    localStorage.setItem('smartaccount_transactions', JSON.stringify(allTransactions));
+  }, [allTransactions]);
+
+  useEffect(() => {
+    localStorage.setItem('smartaccount_fiscal_years', JSON.stringify(fiscalYears));
+  }, [fiscalYears]);
+
+  useEffect(() => {
+    localStorage.setItem('smartaccount_current_fiscal_year', currentFiscalYear);
+  }, [currentFiscalYear]);
+
+  useEffect(() => {
+    localStorage.setItem('smartaccount_closed_years', JSON.stringify(closedYears));
+  }, [closedYears]);
 
   useEffect(() => {
     localStorage.setItem('smartaccount_allocations', JSON.stringify(allocations));
   }, [allocations]);
 
+  // Dynamically compute transactions of the active fiscal year
+  const transactions = allTransactions.filter(tx => {
+    const date = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+    return date ? date.startsWith(currentFiscalYear) : true;
+  });
+
   const addTransaction = (tx: AccountingTransaction) => {
-    setTransactions(prev => [tx, ...prev]);
+    const txYear = (tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT)?.substring(0, 4);
+    if (txYear && closedYears.includes(txYear)) {
+      alert(`Không thể hạch toán! Năm tài chính ${txYear} đã bị KHÓA SỔ kế toán.`);
+      return;
+    }
+    setAllTransactions(prev => [tx, ...prev]);
   };
 
   const deleteTransaction = (id: string) => {
-    setTransactions(prev => prev.filter(tx => tx.id !== id));
+    const foundTx = allTransactions.find(tx => tx.id === id);
+    if (foundTx) {
+      const txYear = (foundTx.type === 'HOADON' ? foundTx.ngayHD : foundTx.ngayCT)?.substring(0, 4);
+      if (txYear && closedYears.includes(txYear)) {
+        alert(`Không thể xóa chứng từ vì năm tài chính ${txYear} đã bị KHÓA SỔ hạch toán.`);
+        return;
+      }
+    }
+    setAllTransactions(prev => prev.filter(tx => tx.id !== id));
   };
 
   const addPartner = (partner: Partner) => {
@@ -144,9 +198,83 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setAccounts(DEFAULT_ACCOUNTS);
       setPartners(DEFAULT_PARTNERS);
       setItems(DEFAULT_INVENTORIES);
-      setTransactions(DEFAULT_TRANSACTIONS);
+      setAllTransactions(DEFAULT_TRANSACTIONS);
       setAllocations(DEFAULT_ALLOCATIONS);
+      setFiscalYears(['2025', '2026', '2027']);
+      setCurrentFiscalYear('2026');
+      setClosedYears([]);
       alert('Đã đặt lại dữ liệu thành công!');
+    }
+  };
+
+  const closeYear = (year: string) => {
+    if (closedYears.includes(year)) {
+      setClosedYears(prev => prev.filter(y => y !== year));
+      alert(`Đã mở khóa sổ thành công cho niên độ kế toán ${year}!`);
+    } else {
+      setClosedYears(prev => [...prev, year]);
+      alert(`Đã khóa sổ kế toán thành công cho niên độ khóa ${year}. Các chứng từ hạch toán của niên độ này đã được đưa vào chế độ chỉ đọc để đảm bảo tính pháp lý.`);
+    }
+  };
+
+  const openNewYear = (year: string) => {
+    if (!year || isNaN(Number(year))) {
+      alert('Năm hạch toán không hợp lệ!');
+      return;
+    }
+    if (fiscalYears.includes(year)) {
+      alert(`Năm tài khóa ${year} đã tồn tại trong hệ thống.`);
+      return;
+    }
+    setFiscalYears(prev => [...prev, year].sort());
+    setCurrentFiscalYear(year);
+    alert(`Đã tạo thành công năm nhập liệu hạch toán ${year} và tự động chuyển đổi sang niên khóa này!`);
+  };
+
+  const backupDatabase = () => {
+    const backupData = {
+      accounts,
+      partners,
+      items,
+      transactions: allTransactions,
+      allocations,
+      fiscalYears,
+      currentFiscalYear,
+      closedYears,
+      version: '1.0.1_TT133',
+      timestamp: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `smartaccount_backup_all_${currentFiscalYear}_${new Date().toISOString().substring(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const restoreDatabase = (data: any): boolean => {
+    try {
+      if (!data || typeof data !== 'object') {
+        alert('File dữ liệu không đúng hoặc bị lỗi định dạng!');
+        return false;
+      }
+      if (data.accounts) setAccounts(data.accounts);
+      if (data.partners) setPartners(data.partners);
+      if (data.items) setItems(data.items);
+      if (data.transactions) setAllTransactions(data.transactions);
+      if (data.allocations) setAllocations(data.allocations);
+      if (data.fiscalYears) setFiscalYears(data.fiscalYears);
+      if (data.currentFiscalYear) setCurrentFiscalYear(data.currentFiscalYear);
+      if (data.closedYears) setClosedYears(data.closedYears);
+      alert('Phục hồi dữ liệu hệ thống từ tệp tin sao lưu thành công!');
+      return true;
+    } catch (e) {
+      console.error(e);
+      alert('Phục hồi thất bại: ' + String(e));
+      return false;
     }
   };
 
@@ -154,7 +282,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (data.accounts) setAccounts(data.accounts);
     if (data.partners) setPartners(data.partners);
     if (data.items) setItems(data.items);
-    if (data.transactions) setTransactions(data.transactions);
+    if (data.transactions) setAllTransactions(data.transactions);
     if (data.allocations) setAllocations(data.allocations);
   };
 
@@ -177,13 +305,13 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         await uploadAccounts(config, accounts);
         await uploadPartners(config, partners);
         await uploadItems(config, items);
-        await uploadTransactions(config, transactions);
+        await uploadTransactions(config, allTransactions);
         await uploadAllocations(config, allocations);
         
         setCloudSyncStatus({
           loading: false,
           error: null,
-          success: `Đồng bộ lên đám mây Supabase thành công lúc ${new Date().toLocaleTimeString()}! Đã tải lên ${accounts.length} TK, ${partners.length} đối tác, ${items.length} vật tư, ${transactions.length} chứng từ.`
+          success: `Đồng bộ lên đám mây Supabase thành công lúc ${new Date().toLocaleTimeString()}! Đã tải lên ${accounts.length} TK, ${partners.length} đối tác, ${items.length} vật tư, ${allTransactions.length} chứng từ.`
         });
       } else {
         // Download updates from Supabase
@@ -192,7 +320,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setAccounts(cloudData.accounts);
         setPartners(cloudData.partners);
         setItems(cloudData.items);
-        setTransactions(cloudData.transactions);
+        setAllTransactions(cloudData.transactions);
         setAllocations(cloudData.allocations);
 
         setCloudSyncStatus({
@@ -222,6 +350,14 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       allocations,
       activeModule,
       setActiveModule,
+      fiscalYears,
+      currentFiscalYear,
+      closedYears,
+      setCurrentFiscalYear,
+      closeYear,
+      openNewYear,
+      backupDatabase,
+      restoreDatabase,
       addTransaction,
       deleteTransaction,
       addPartner,

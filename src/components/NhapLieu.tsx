@@ -9,7 +9,7 @@ import { InventoryItem, Partner, AccountingTransaction } from '../types';
 import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, ListCollapse, Users, X } from 'lucide-react';
 
 export default function NhapLieu() {
-  const { partners, items, accounts, addTransaction, addPartner } = useAccounting();
+  const { partners, items, accounts, addTransaction, addPartner, currentFiscalYear, closedYears } = useAccounting();
 
   const [activeEntryType, setActiveEntryType] = useState<'HOADON' | 'PHIEUKT'>('HOADON');
 
@@ -79,10 +79,25 @@ export default function NhapLieu() {
   // ==========================================
   const [loaiHD, setLoaiHD] = useState<'BR' | 'MV'>('BR');
   const [soHD, setSoHD] = useState('');
-  const [kyHieuHD, setKyHieuHD] = useState('BM/26E');
-  const [ngayHD, setNgayHD] = useState('2026-06-17');
+  const [kyHieuHD, setKyHieuHD] = useState(`BM/${currentFiscalYear.substring(2)}E`);
+  const [ngayHD, setNgayHD] = useState(`${currentFiscalYear}-06-17`);
   const [maKH, setMaKH] = useState('');
   const [dienGiaiHD, setDienGiaiHD] = useState('');
+
+  // ==========================================
+  // Form state for: DATA ENTRY - JOURNAL VOUCHERS (PHIEUKT)
+  // ==========================================
+  const [soCT, setSoCT] = useState('');
+  const [ngayCT, setNgayCT] = useState(`${currentFiscalYear}-06-17`);
+  const [dienGiaiCT, setDienGiaiCT] = useState('');
+  const [maKH_CT, setMaKH_CT] = useState('');
+
+  // Sync date year with current fiscal year
+  React.useEffect(() => {
+    setNgayHD(`${currentFiscalYear}-06-17`);
+    setNgayCT(`${currentFiscalYear}-06-17`);
+    setKyHieuHD(`BM/${currentFiscalYear.substring(2)}E`);
+  }, [currentFiscalYear]);
   
   // Standard account mapping presets
   const [tkNoHD, setTkNoHD] = useState('131');
@@ -191,14 +206,6 @@ export default function NhapLieu() {
   };
 
 
-  // ==========================================
-  // Form state for: DATA ENTRY - JOURNAL VOUCHERS (PHIEUKT)
-  // ==========================================
-  const [soCT, setSoCT] = useState('');
-  const [ngayCT, setNgayCT] = useState('2026-06-17');
-  const [dienGiaiCT, setDienGiaiCT] = useState('');
-  const [maKH_CT, setMaKH_CT] = useState('');
-
   // Sub entries lines
   const [voucherLines, setVoucherLines] = useState<Array<{
     soTK: string;
@@ -299,35 +306,56 @@ export default function NhapLieu() {
   return (
     <div className="space-y-6" id="giao-dien-nhap-lieu">
       {/* Header with Selector tab of entry modes */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-800 tracking-tight flex items-center gap-2">
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 md:col-span-3">
+        <div className="space-y-1.5 lg:max-w-md">
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
               <PlusCircle className="w-6 h-6" />
             </span>
-            Khai báo hạch toán & Nhập liệu Chứng từ
+            Khai báo Hạch Toán / Nhập Liệu
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Phân hệ nhập hóa đơn, định khoản công nợ, luân chuyển kho bãi, chi tiêu, kết chuyển sổ cái</p>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Hỗ trợ tự động hạch toán hóa đơn mua - bán hàng chi tiết và lập phiếu kế toán kép linh hoạt cho các nghiệp vụ phức tạp.
+          </p>
         </div>
 
-        <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full lg:w-[65%]" id="unified-entry-selector">
           <button
             onClick={() => setActiveEntryType('HOADON')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-              activeEntryType === 'HOADON' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-800'
+            type="button"
+            className={`p-4 rounded-xl text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-1.5 ${
+              activeEntryType === 'HOADON'
+                ? 'border-indigo-600 bg-indigo-50/20 shadow-xs text-indigo-900 font-bold'
+                : 'border-slate-200 hover:border-slate-350 bg-slate-50/50 text-slate-700'
             }`}
-            id="tab-invoice-entry"
+            id="select-entry-hoadon-btn"
           >
-            A. Ghi Sổ Hóa Đơn Vạt Tư (MV / BR)
+            <div className="flex items-center gap-1.5 font-bold">
+              <FileSpreadsheet className={`w-4 h-4 ${activeEntryType === 'HOADON' ? 'text-indigo-600' : 'text-slate-500'}`} />
+              <span className="text-xs uppercase tracking-wide">A. Hóa Đơn Vạt Tư (MV/BR)</span>
+            </div>
+            <p className="text-[11px] text-slate-500 font-normal leading-normal">
+              Áp dụng hạch toán đơn giản <strong>1 Nợ - 1 Có</strong> đối kháng có kê khai số lượng và đơn giá cụ thể.
+            </p>
           </button>
+
           <button
             onClick={() => setActiveEntryType('PHIEUKT')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all cursor-pointer ${
-              activeEntryType === 'PHIEUKT' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-800'
+            type="button"
+            className={`p-4 rounded-xl text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-1.5 ${
+              activeEntryType === 'PHIEUKT'
+                ? 'border-indigo-600 bg-indigo-50/20 shadow-xs text-indigo-900 font-bold'
+                : 'border-slate-200 hover:border-slate-350 bg-slate-50/50 text-slate-700'
             }`}
-            id="tab-journal-entry"
+            id="select-entry-pkt-btn"
           >
-            B. Chứng Từ Kế Toán Phức Hợp (Phiếu KT)
+            <div className="flex items-center gap-1.5 font-bold">
+              <PlusCircle className={`w-4 h-4 ${activeEntryType === 'PHIEUKT' ? 'text-indigo-600' : 'text-slate-500'}`} />
+              <span className="text-xs uppercase tracking-wide">B. Phiếu Kế Toán (KT Phức Hợp)</span>
+            </div>
+            <p className="text-[11px] text-slate-500 font-normal leading-normal">
+              Sử dụng khi hạch toán phức tạp phát sinh <strong>nhiều Nợ / nhiều Có</strong> (bút toán phân bổ, thuế đầu ra gộp).
+            </p>
           </button>
         </div>
       </div>

@@ -10,11 +10,13 @@ import {
   InventoryItem,
   AccountingTransaction,
   BudgetAllocation,
+  CompanyInfo,
   DEFAULT_ACCOUNTS,
   DEFAULT_PARTNERS,
   DEFAULT_INVENTORIES,
   DEFAULT_TRANSACTIONS,
-  DEFAULT_ALLOCATIONS
+  DEFAULT_ALLOCATIONS,
+  DEFAULT_COMPANY_INFO
 } from '../types';
 import { getSupabaseConfig, uploadAccounts, uploadPartners, uploadItems, uploadTransactions, uploadAllocations, fetchAllFromSupabase } from './supabaseService';
 
@@ -26,6 +28,9 @@ interface AccountingState {
   allocations: BudgetAllocation[];
   activeModule: string;
   setActiveModule: (module: string) => void;
+  
+  companyInfo: CompanyInfo;
+  updateCompanyInfo: (info: CompanyInfo) => void;
   
   fiscalYears: string[];
   currentFiscalYear: string;
@@ -103,6 +108,11 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return saved ? JSON.parse(saved) : DEFAULT_ALLOCATIONS;
   });
 
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
+    const saved = localStorage.getItem('smartaccount_company_info');
+    return saved ? JSON.parse(saved) : DEFAULT_COMPANY_INFO;
+  });
+
   const [activeModule, setActiveModule] = useState<string>('MENU');
 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<{
@@ -143,6 +153,14 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     localStorage.setItem('smartaccount_allocations', JSON.stringify(allocations));
   }, [allocations]);
+
+  useEffect(() => {
+    localStorage.setItem('smartaccount_company_info', JSON.stringify(companyInfo));
+  }, [companyInfo]);
+
+  const updateCompanyInfo = (info: CompanyInfo) => {
+    setCompanyInfo(info);
+  };
 
   // Dynamically compute transactions of the active fiscal year
   const transactions = allTransactions.filter(tx => {
@@ -200,6 +218,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setItems(DEFAULT_INVENTORIES);
       setAllTransactions(DEFAULT_TRANSACTIONS);
       setAllocations(DEFAULT_ALLOCATIONS);
+      setCompanyInfo(DEFAULT_COMPANY_INFO);
       setFiscalYears(['2025', '2026', '2027']);
       setCurrentFiscalYear('2026');
       setClosedYears([]);
@@ -241,6 +260,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       fiscalYears,
       currentFiscalYear,
       closedYears,
+      companyInfo,
       version: '1.0.1_TT133',
       timestamp: new Date().toISOString()
     };
@@ -269,6 +289,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (data.fiscalYears) setFiscalYears(data.fiscalYears);
       if (data.currentFiscalYear) setCurrentFiscalYear(data.currentFiscalYear);
       if (data.closedYears) setClosedYears(data.closedYears);
+      if (data.companyInfo) setCompanyInfo(data.companyInfo);
       alert('Phục hồi dữ liệu hệ thống từ tệp tin sao lưu thành công!');
       return true;
     } catch (e) {
@@ -350,6 +371,8 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       allocations,
       activeModule,
       setActiveModule,
+      companyInfo,
+      updateCompanyInfo,
       fiscalYears,
       currentFiscalYear,
       closedYears,

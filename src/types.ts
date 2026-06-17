@@ -13,6 +13,40 @@ export interface Account {
   openingCredit?: number;
 }
 
+export interface CompanyInfo {
+  name: string;
+  address: string;
+  phone: string;
+  bankAccount: string;
+  bankName: string;
+  representative: string;
+  taxCode: string;
+  province: string;
+  email: string;
+  zalo: string;
+  facebook: string;
+  position: string;
+  startDate: string;
+  endDate: string;
+}
+
+export const DEFAULT_COMPANY_INFO: CompanyInfo = {
+  name: 'CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC',
+  address: 'TP Đà Nẵng',
+  phone: '',
+  bankAccount: '0',
+  bankName: 'NH XXXXX',
+  representative: '',
+  taxCode: '123456789',
+  province: 'Quảng Nam',
+  email: 'xxxgmail.com',
+  zalo: '949595969',
+  facebook: '',
+  position: 'Giám đốc',
+  startDate: '2025-01-01',
+  endDate: '2026-12-31'
+};
+
 export interface Partner {
   id: string; // matches code
   code: string; // e.g. 131-BINHMINH

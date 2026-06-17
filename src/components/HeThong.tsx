@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAccounting } from '../utils/accountingState';
 import { 
   Lock, 
@@ -18,7 +18,8 @@ import {
   Archive,
   Calendar,
   Layers,
-  HelpCircle
+  HelpCircle,
+  Building
 } from 'lucide-react';
 
 export default function HeThong() {
@@ -32,8 +33,67 @@ export default function HeThong() {
     backupDatabase,
     restoreDatabase,
     allTransactions,
-    resetToDefault
+    resetToDefault,
+    companyInfo,
+    updateCompanyInfo
   } = useAccounting() as any;
+
+  // Local state for company profile form fields
+  const [compName, setCompName] = useState(companyInfo?.name || '');
+  const [compAddress, setCompAddress] = useState(companyInfo?.address || '');
+  const [compPhone, setCompPhone] = useState(companyInfo?.phone || '');
+  const [compBankAccount, setCompBankAccount] = useState(companyInfo?.bankAccount || '');
+  const [compBankName, setCompBankName] = useState(companyInfo?.bankName || '');
+  const [compRepresentative, setCompRepresentative] = useState(companyInfo?.representative || '');
+  const [compTaxCode, setCompTaxCode] = useState(companyInfo?.taxCode || '');
+  const [compProvince, setCompProvince] = useState(companyInfo?.province || '');
+  const [compEmail, setCompEmail] = useState(companyInfo?.email || '');
+  const [compZalo, setCompZalo] = useState(companyInfo?.zalo || '');
+  const [compFacebook, setCompFacebook] = useState(companyInfo?.facebook || '');
+  const [compPosition, setCompPosition] = useState(companyInfo?.position || '');
+  const [compStartDate, setCompStartDate] = useState(companyInfo?.startDate || '2025-01-01');
+  const [compEndDate, setCompEndDate] = useState(companyInfo?.endDate || '2026-12-31');
+
+  // Quiet sync when companyInfo changes (e.g. from restore backup or reset)
+  useEffect(() => {
+    if (companyInfo) {
+      setCompName(companyInfo.name || '');
+      setCompAddress(companyInfo.address || '');
+      setCompPhone(companyInfo.phone || '');
+      setCompBankAccount(companyInfo.bankAccount || '');
+      setCompBankName(companyInfo.bankName || '');
+      setCompRepresentative(companyInfo.representative || '');
+      setCompTaxCode(companyInfo.taxCode || '');
+      setCompProvince(companyInfo.province || '');
+      setCompEmail(companyInfo.email || '');
+      setCompZalo(companyInfo.zalo || '');
+      setCompFacebook(companyInfo.facebook || '');
+      setCompPosition(companyInfo.position || '');
+      setCompStartDate(companyInfo.startDate || '2025-01-01');
+      setCompEndDate(companyInfo.endDate || '2026-12-31');
+    }
+  }, [companyInfo]);
+
+  const handleSaveCompanyInfo = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateCompanyInfo({
+      name: compName,
+      address: compAddress,
+      phone: compPhone,
+      bankAccount: compBankAccount,
+      bankName: compBankName,
+      representative: compRepresentative,
+      taxCode: compTaxCode,
+      province: compProvince,
+      email: compEmail,
+      zalo: compZalo,
+      facebook: compFacebook,
+      position: compPosition,
+      startDate: compStartDate,
+      endDate: compEndDate
+    });
+    alert('Đã cập nhật cấu hình thông tin doanh nghiệp thành công trên hệ thống!');
+  };
 
   const [newYearInput, setNewYearInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -116,6 +176,218 @@ export default function HeThong() {
           <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></span>
           <span>Hệ thống hoạt động ổn định local</span>
         </div>
+      </div>
+
+      {/* THÔNG TIN DOANH NGHIỆP SECTION */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4" id="section-thong-tin-doanh-nghiep">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Building className="w-5 h-5 text-indigo-600" />
+            <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Cấu hình Thông tin doanh nghiệp</h3>
+          </div>
+          <span className="text-[10px] text-slate-400 font-bold font-mono bg-slate-50 border border-slate-150 px-2 py-0.5 rounded-md">TT 133/2016/TT-BTC</span>
+        </div>
+
+        <form onSubmit={handleSaveCompanyInfo} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            
+            {/* Cột trái */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Tên doanh nghiệp:
+                </label>
+                <input
+                  type="text"
+                  value={compName}
+                  onChange={(e) => setCompName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold text-slate-800"
+                  placeholder="CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Địa chỉ:
+                </label>
+                <input
+                  type="text"
+                  value={compAddress}
+                  onChange={(e) => setCompAddress(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-medium text-slate-700"
+                  placeholder="TP Đà Nẵng"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Số điện thoại:
+                </label>
+                <input
+                  type="text"
+                  value={compPhone}
+                  onChange={(e) => setCompPhone(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-medium font-mono text-slate-700"
+                  placeholder="Nhập số điện thoại..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Tài khoản ngân hàng:
+                </label>
+                <input
+                  type="text"
+                  value={compBankAccount}
+                  onChange={(e) => setCompBankAccount(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold font-mono text-slate-800"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Tên Ngân hàng:
+                </label>
+                <input
+                  type="text"
+                  value={compBankName}
+                  onChange={(e) => setCompBankName(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold text-slate-700"
+                  placeholder="NH XXXXX"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Người đại diện:
+                </label>
+                <input
+                  type="text"
+                  value={compRepresentative}
+                  onChange={(e) => setCompRepresentative(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-medium text-slate-700"
+                  placeholder="Tên người đại diện..."
+                />
+              </div>
+            </div>
+
+            {/* Cột phải */}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Mã số thuế:
+                </label>
+                <input
+                  type="text"
+                  value={compTaxCode}
+                  onChange={(e) => setCompTaxCode(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold font-mono text-slate-800"
+                  placeholder="123456789"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Tỉnh/TP:
+                </label>
+                <input
+                  type="text"
+                  value={compProvince}
+                  onChange={(e) => setCompProvince(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold text-slate-700"
+                  placeholder="Quảng Nam"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Email:
+                </label>
+                <input
+                  type="text"
+                  value={compEmail}
+                  onChange={(e) => setCompEmail(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-medium text-slate-750"
+                  placeholder="xxxgmail.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Zalo:
+                </label>
+                <input
+                  type="text"
+                  value={compZalo}
+                  onChange={(e) => setCompZalo(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold font-mono text-slate-700"
+                  placeholder="949595969"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Facebook:
+                </label>
+                <input
+                  type="text"
+                  value={compFacebook}
+                  onChange={(e) => setCompFacebook(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-medium text-slate-700"
+                  placeholder="Nhập link trang cá nhân/doanh nghiệp..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                  Chức vụ:
+                </label>
+                <input
+                  type="text"
+                  value={compPosition}
+                  onChange={(e) => setCompPosition(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold text-slate-700"
+                  placeholder="Giám đốc"
+                />
+              </div>
+            </div>
+            
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Chu kỳ hạch toán từ ngày:</label>
+              <input
+                type="date"
+                value={compStartDate}
+                onChange={(e) => setCompStartDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold font-mono text-slate-800"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Đến ngày:</label>
+              <input
+                type="date"
+                value={compEndDate}
+                onChange={(e) => setCompEndDate(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50/50 hover:bg-white focus:bg-white rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 font-bold font-mono text-slate-800"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer hover:shadow-md active:scale-95"
+              id="btn-save-company-info"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Lưu cấu hình thông tin doanh nghiệp
+            </button>
+          </div>
+        </form>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

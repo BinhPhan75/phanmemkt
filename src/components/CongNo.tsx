@@ -9,7 +9,7 @@ import { Partner } from '../types';
 import { Users, FileMinus, FilePlus, ChevronRight, BookOpen, AlertCircle, Plus, Search, Building, Printer } from 'lucide-react';
 
 export default function CongNo() {
-  const { partners, transactions, addPartner } = useAccounting();
+  const { partners, transactions, addPartner, companyInfo } = useAccounting() as any;
   const [selectedAcc, setSelectedAcc] = useState<'131' | '331'>('131');
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('');
   const [selectedSubTab, setSelectedSubTab] = useState<'TONG_HOP' | 'CHI_TIET'>('TONG_HOP');
@@ -387,8 +387,8 @@ export default function CongNo() {
         <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden flex flex-col" id="ar-ap-tonghop-sheet">
           <div className="p-6 border-b border-slate-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
-              <div className="text-[11px] text-slate-400 font-normal">TP Đà Nẵng</div>
+              <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">{companyInfo?.name || 'CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC'}</div>
+              <div className="text-[11px] text-slate-400 font-normal">{companyInfo?.address || 'TP Đà Nẵng'}</div>
               
               <h3 className="text-xl font-black text-slate-800 tracking-wider uppercase mt-3">
                 {selectedAcc === '131' 
@@ -654,8 +654,8 @@ export default function CongNo() {
               <div>
                 <div className="p-6 border-b border-indigo-100 bg-indigo-50/5 relative">
                   <div className="absolute top-5 left-6 text-xs text-slate-500 font-bold space-y-0.5">
-                    <div className="subtitle-logo uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
-                    <div className="text-slate-400 font-normal">TP Đà Nẵng</div>
+                    <div className="subtitle-logo uppercase tracking-wider">{companyInfo?.name || 'CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC'}</div>
+                    <div className="text-slate-400 font-normal">{companyInfo?.address || 'TP Đà Nẵng'}</div>
                   </div>
 
                   <div className="text-center pt-8 pb-3 space-y-1">

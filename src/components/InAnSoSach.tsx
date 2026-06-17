@@ -9,7 +9,7 @@ import { Account, AccountingTransaction } from '../types';
 import { FileText, Printer, Search, Calendar, FileCheck, RefreshCw } from 'lucide-react';
 
 export default function InAnSoSach() {
-  const { transactions, accounts, partners } = useAccounting();
+  const { transactions, accounts, partners, companyInfo } = useAccounting() as any;
   const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT' | 'SCT_131' | 'SCT_331' | 'TH_131' | 'TH_331' | 'CTGS'>('NKC');
   const [selectedAccCode, setSelectedAccCode] = useState<string>('1121'); // default to 1121 as requested
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('131-BINHMINH'); // default customer partner
@@ -968,8 +968,8 @@ export default function InAnSoSach() {
           {/* Organization & Header Metadata as shown in Image 1 */}
           <div className="p-6 border-b border-emerald-100 bg-emerald-50/5 relative">
             <div className="absolute top-5 left-6 text-xs text-slate-500 font-bold space-y-0.5">
-              <div className="uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
-              <div className="text-slate-400 font-normal">TP Đà Nẵng</div>
+              <div className="uppercase tracking-wider">{companyInfo?.name || 'CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC'}</div>
+              <div className="text-slate-400 font-normal">{companyInfo?.address || 'TP Đà Nẵng'}</div>
             </div>
 
             <div className="text-center pt-8 pb-4 space-y-1">

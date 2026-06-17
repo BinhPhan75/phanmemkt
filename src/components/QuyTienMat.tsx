@@ -9,7 +9,7 @@ import { AccountingTransaction } from '../types';
 import { FileDown, FileUp, Printer, DollarSign, Wallet, ArrowUpRight, ArrowDownRight, Users, Plus, X, CreditCard } from 'lucide-react';
 
 export default function QuyTienMat() {
-  const { transactions, partners, accounts, addTransaction, companyInfo } = useAccounting() as any;
+  const { transactions, partners, accounts, addTransaction, addPartner, companyInfo } = useAccounting() as any;
   const [selectedAcc, setSelectedAcc] = useState<'111' | '112'>('111');
   const [filterStartDate, setFilterStartDate] = useState('2026-06-01');
   const [filterEndDate, setFilterEndDate] = useState('2026-06-30');
@@ -25,6 +25,14 @@ export default function QuyTienMat() {
   const [formReciprocalAcc, setFormReciprocalAcc] = useState('');
   const [formAmount, setFormAmount] = useState<number | ''>('');
   const [formDescription, setFormDescription] = useState('');
+
+  // Quick Add Partner states
+  const [showQuickAddPartner, setShowQuickAddPartner] = useState(false);
+  const [newPartnerCode, setNewPartnerCode] = useState('');
+  const [newPartnerName, setNewPartnerName] = useState('');
+  const [newPartnerAddress, setNewPartnerAddress] = useState('');
+  const [newPartnerTaxCode, setNewPartnerTaxCode] = useState('');
+  const [newPartnerType, setNewPartnerType] = useState<'CUSTOMER' | 'VENDOR' | 'BOTH'>('BOTH');
 
   const formatDateDMY = (dateStr: string): string => {
     if (!dateStr) return '';
@@ -632,9 +640,25 @@ export default function QuyTienMat() {
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
-                  Đối tác giao dịch:
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    Đối tác giao dịch:
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const willShow = !showQuickAddPartner;
+                      setShowQuickAddPartner(willShow);
+                      if (willShow && !newPartnerCode) {
+                        const prefix = (voucherType === 'PT' || voucherType === 'BC') ? '131-' : '331-';
+                        setNewPartnerCode(`${prefix}NEW-${Date.now().toString().slice(-4)}`);
+                      }
+                    }}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-extrabold flex items-center gap-0.5 cursor-pointer"
+                  >
+                    {showQuickAddPartner ? '× Đóng thêm nhanh' : '+ Thêm nhanh đối tác'}
+                  </button>
+                </div>
                 <select
                   value={formPartnerCode}
                   onChange={(e) => setFormPartnerCode(e.target.value)}
@@ -647,6 +671,121 @@ export default function QuyTienMat() {
                   ))}
                   <option value="KHAC">Đối tác Khác / Lẻ thường trú</option>
                 </select>
+
+                {showQuickAddPartner && (
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-150 space-y-2.5 mt-2 animate-fade-in transition-all">
+                    <div className="text-[10px] font-extrabold text-indigo-700 uppercase tracking-widest pb-1 border-b border-indigo-100 flex items-center justify-between">
+                      <span>Thêm nhanh đối tác mới</span>
+                      <span className="text-[9px] text-slate-400 font-bold uppercase">Lập danh mục</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Mã đối tác (ID):</label>
+                        <input
+                          type="text"
+                          value={newPartnerCode}
+                          onChange={(e) => setNewPartnerCode(e.target.value.toUpperCase())}
+                          placeholder="Ví dụ: 131-ANHDUONG"
+                          className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white font-mono font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Tên đối tác / Thương hiệu:</label>
+                        <input
+                          type="text"
+                          value={newPartnerName}
+                          onChange={(e) => setNewPartnerName(e.target.value)}
+                          placeholder="Tên đối tác..."
+                          className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white font-semibold"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Mã số thuế (nếu có):</label>
+                        <input
+                          type="text"
+                          value={newPartnerTaxCode}
+                          onChange={(e) => setNewPartnerTaxCode(e.target.value)}
+                          placeholder="Mã số thuế..."
+                          className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Phân loại liên kết:</label>
+                        <select
+                          value={newPartnerType}
+                          onChange={(e: any) => setNewPartnerType(e.target.value)}
+                          className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white font-bold"
+                        >
+                          <option value="CUSTOMER">Khách hàng (131)</option>
+                          <option value="VENDOR">Nhà cung cấp (331)</option>
+                          <option value="BOTH">Tất cả (BOTH)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Địa chỉ trụ sở:</label>
+                      <input
+                        type="text"
+                        value={newPartnerAddress}
+                        onChange={(e) => setNewPartnerAddress(e.target.value)}
+                        placeholder="Nhập địa chỉ..."
+                        className="w-full px-2 py-1 text-xs border border-slate-200 rounded bg-white"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowQuickAddPartner(false);
+                          setNewPartnerCode('');
+                          setNewPartnerName('');
+                          setNewPartnerAddress('');
+                          setNewPartnerTaxCode('');
+                        }}
+                        className="px-2.5 py-1 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-600 rounded font-bold transition cursor-pointer"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!newPartnerCode.trim() || !newPartnerName.trim()) {
+                            alert('Vui lòng nhập đầy đủ Mã đối tác và Tên đối tác!');
+                            return;
+                          }
+                          const duplicated = partners.some((p: any) => p.code.toLowerCase() === newPartnerCode.trim().toLowerCase());
+                          if (duplicated) {
+                            alert('Mã đối tác này đã tồn tại trong danh mục!');
+                            return;
+                          }
+                          const freshPartner = {
+                            id: newPartnerCode.trim().toUpperCase(),
+                            code: newPartnerCode.trim().toUpperCase(),
+                            name: newPartnerName.trim(),
+                            address: newPartnerAddress.trim(),
+                            taxCode: newPartnerTaxCode.trim(),
+                            type: newPartnerType,
+                            openingDebit: 0,
+                            openingCredit: 0
+                          };
+                          addPartner(freshPartner);
+                          setFormPartnerCode(freshPartner.code);
+                          setShowQuickAddPartner(false);
+                          setNewPartnerCode('');
+                          setNewPartnerName('');
+                          setNewPartnerAddress('');
+                          setNewPartnerTaxCode('');
+                          alert(`Đã thêm nhanh đối tác [${freshPartner.code}] thành công và tự động chọn.`);
+                        }}
+                        className="px-3 py-1 text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white rounded font-extrabold shadow-sm transition cursor-pointer"
+                      >
+                        Xác nhận thêm
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>

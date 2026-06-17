@@ -10,10 +10,274 @@ import { FileText, Printer, Search, Calendar, FileCheck, RefreshCw } from 'lucid
 
 export default function InAnSoSach() {
   const { transactions, accounts, partners } = useAccounting();
-  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI'>('NKC');
-  const [selectedAccCode, setSelectedAccCode] = useState<string>('111');
+  const [selectedBook, setSelectedBook] = useState<'NKC' | 'SOCAI' | 'SCT'>('NKC');
+  const [selectedAccCode, setSelectedAccCode] = useState<string>('1121'); // default to 1121 as requested
   const [startDate, setStartDate] = useState('2026-06-01');
   const [endDate, setEndDate] = useState('2026-06-30');
+
+  // Calculate account balances up to (excluding) startDate to compute true Opening Balance for the period
+  const getTrueOpeningBalanceForAccount = (accCode: string) => {
+    const acc = accounts.find(a => a.code === accCode);
+    let openingDebit = acc?.openingDebit || 0;
+    let openingCredit = acc?.openingCredit || 0;
+
+    // Get all transactions BEFORE startDate
+    transactions.forEach(tx => {
+      const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+      if (dbDate >= startDate) return; // only interested in historical values before active period
+
+      if (tx.type === 'HOADON') {
+        const totalBase = tx.items.reduce((s, i) => s + i.thanhTien, 0);
+        const totalTax = tx.items.reduce((s, i) => s + i.tienThue, 0);
+        const totalValue = totalBase + totalTax;
+
+        if (tx.loaiHD === 'BR') {
+          // Debit tkNo, Credit tkCo (511)
+          if (tx.tkNo === accCode || tx.tkNo.startsWith(accCode)) {
+            openingDebit += totalValue;
+          }
+          if (tx.tkCo === accCode || tx.tkCo.startsWith(accCode)) {
+            openingCredit += totalValue;
+          }
+          if (totalTax > 0) {
+            if ('33311' === accCode || '33311'.startsWith(accCode)) {
+              openingCredit += totalTax;
+            }
+          }
+          if (tx.tkGiaVonNo && tx.tkGiaVonCo) {
+            const standardCost = Math.round(totalBase * 0.65);
+            if (tx.tkGiaVonNo === accCode || tx.tkGiaVonNo.startsWith(accCode)) {
+              openingDebit += standardCost;
+            }
+            if (tx.tkGiaVonCo === accCode || tx.tkGiaVonCo.startsWith(accCode)) {
+              openingCredit += standardCost;
+            }
+          }
+        } else {
+          // MV Purchase: Debit tkNo, Credit tkCo
+          if (tx.tkNo === accCode || tx.tkNo.startsWith(accCode)) {
+            openingDebit += totalBase;
+          }
+          if (tx.tkCo === accCode || tx.tkCo.startsWith(accCode)) {
+            openingCredit += totalBase;
+          }
+          if (totalTax > 0) {
+            if ('1331' === accCode || '1331'.startsWith(accCode)) {
+              openingDebit += totalTax;
+            }
+          }
+        }
+      } else {
+        // Journal Voucher (PHIEUKT)
+        tx.lines.forEach(l => {
+          if (l.soTK === accCode || l.soTK.startsWith(accCode)) {
+            openingDebit += l.psNo;
+            openingCredit += l.psCo;
+          }
+        });
+      }
+    });
+
+    return { openingDebit, openingCredit };
+  };
+
+  // Generate detailed rows with real-time running balance for Sổ Chi Tiết các Tài Khoản (SCT)
+  const getDetailedLedgerData = () => {
+    // 1. Get true opening balance up to (excluding) startDate
+    const { openingDebit, openingCredit } = getTrueOpeningBalanceForAccount(selectedAccCode);
+    let runningBalance = openingDebit - openingCredit;
+
+    const activeEntries: Array<{
+      date: string;
+      docNo: string;
+      description: string;
+      acc: string;
+      recAcc: string;
+      debit: number;
+      credit: number;
+      balDebit: number;
+      balCredit: number;
+    }> = [];
+
+    // Temporary array before calculation
+    const rawEntries: any[] = [];
+
+    // Filter transactions inside the date range and extract double entries
+    transactions.forEach(tx => {
+      const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+      if (dbDate < startDate || dbDate > endDate) return;
+
+      if (tx.type === 'HOADON') {
+        const totalBase = tx.items.reduce((s, i) => s + i.thanhTien, 0);
+        const totalTax = tx.items.reduce((s, i) => s + i.tienThue, 0);
+        const totalValue = totalBase + totalTax;
+
+        if (tx.loaiHD === 'BR') {
+          // Sales: Debit tkNo, Credit 511, Credit 33311
+          if (tx.tkNo === selectedAccCode || tx.tkNo.startsWith(selectedAccCode)) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: tx.dienGiai,
+              acc: tx.tkNo,
+              recAcc: tx.tkCo || '511',
+              debit: totalValue,
+              credit: 0
+            });
+          }
+          if (tx.tkCo === selectedAccCode || tx.tkCo.startsWith(selectedAccCode)) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: tx.dienGiai,
+              acc: tx.tkCo,
+              recAcc: tx.tkNo,
+              debit: 0,
+              credit: totalBase
+            });
+          }
+          if (totalTax > 0 && (selectedAccCode === '33311' || '33311'.startsWith(selectedAccCode))) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: `Thuế GTGT đầu ra - ${tx.soHD}`,
+              acc: '33311',
+              recAcc: tx.tkNo,
+              debit: 0,
+              credit: totalTax
+            });
+          }
+          // COGS
+          if (tx.tkGiaVonNo && tx.tkGiaVonCo) {
+            const standardCost = Math.round(totalBase * 0.65);
+            if (tx.tkGiaVonNo === selectedAccCode || tx.tkGiaVonNo.startsWith(selectedAccCode)) {
+              rawEntries.push({
+                date: dbDate,
+                docNo: `XKC-${tx.soHD}`,
+                description: `Giá vốn hàng bán - ${tx.soHD}`,
+                acc: tx.tkGiaVonNo,
+                recAcc: tx.tkGiaVonCo,
+                debit: standardCost,
+                credit: 0
+              });
+            }
+            if (tx.tkGiaVonCo === selectedAccCode || tx.tkGiaVonCo.startsWith(selectedAccCode)) {
+              rawEntries.push({
+                date: dbDate,
+                docNo: `XKC-${tx.soHD}`,
+                description: `Giá vốn hàng bán - ${tx.soHD}`,
+                acc: tx.tkGiaVonCo,
+                recAcc: tx.tkGiaVonNo,
+                debit: 0,
+                credit: standardCost
+              });
+            }
+          }
+        } else {
+          // MV Purchase: Debit tkNo, Debit 1331, Credit tkCo
+          if (tx.tkNo === selectedAccCode || tx.tkNo.startsWith(selectedAccCode)) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: tx.dienGiai,
+              acc: tx.tkNo,
+              recAcc: tx.tkCo,
+              debit: totalBase,
+              credit: 0
+            });
+          }
+          if (tx.tkCo === selectedAccCode || tx.tkCo.startsWith(selectedAccCode)) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: tx.dienGiai,
+              acc: tx.tkCo,
+              recAcc: tx.tkNo,
+              debit: 0,
+              credit: totalValue
+            });
+          }
+          if (totalTax > 0 && (selectedAccCode === '1331' || '1331'.startsWith(selectedAccCode))) {
+            rawEntries.push({
+              date: dbDate,
+              docNo: tx.soHD,
+              description: `Thuế GTGT đầu vào khấu trừ - ${tx.soHD}`,
+              acc: '1331',
+              recAcc: tx.tkCo,
+              debit: totalTax,
+              credit: 0
+            });
+          }
+        }
+      } else {
+        // Journal Voucher (PHIEUKT)
+        const debits = tx.lines.filter(l => l.loaiTK === 'No');
+        const credits = tx.lines.filter(l => l.loaiTK === 'Co');
+
+        debits.forEach(d => {
+          credits.forEach(c => {
+            const matchedAmount = d.psNo > 0 ? d.psNo : c.psCo;
+            if (d.soTK === selectedAccCode || d.soTK.startsWith(selectedAccCode)) {
+              rawEntries.push({
+                date: dbDate,
+                docNo: tx.soCT,
+                description: d.dienGiai || tx.dienGiai,
+                acc: d.soTK,
+                recAcc: c.soTK,
+                debit: matchedAmount,
+                credit: 0
+              });
+            }
+            if (c.soTK === selectedAccCode || c.soTK.startsWith(selectedAccCode)) {
+              rawEntries.push({
+                date: dbDate,
+                docNo: tx.soCT,
+                description: c.dienGiai || tx.dienGiai,
+                acc: c.soTK,
+                recAcc: d.soTK,
+                debit: 0,
+                credit: matchedAmount
+              });
+            }
+          });
+        });
+      }
+    });
+
+    // Sort raw entries by date
+    rawEntries.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Compute running values step-by-step
+    const rows = rawEntries.map(e => {
+      runningBalance += e.debit - e.credit;
+      return {
+        ...e,
+        balDebit: runningBalance >= 0 ? runningBalance : 0,
+        balCredit: runningBalance < 0 ? Math.abs(runningBalance) : 0
+      };
+    });
+
+    const initialBalDebit = (openingDebit - openingCredit) >= 0 ? (openingDebit - openingCredit) : 0;
+    const initialBalCredit = (openingDebit - openingCredit) < 0 ? Math.abs(openingDebit - openingCredit) : 0;
+
+    const totalDebit = rawEntries.reduce((s, e) => s + e.debit, 0);
+    const totalCredit = rawEntries.reduce((s, e) => s + e.credit, 0);
+
+    const finalBalDebit = runningBalance >= 0 ? runningBalance : 0;
+    const finalBalCredit = runningBalance < 0 ? Math.abs(runningBalance) : 0;
+
+    return {
+      rows,
+      initialBalDebit,
+      initialBalCredit,
+      totalDebit,
+      totalCredit,
+      finalBalDebit,
+      finalBalCredit
+    };
+  };
+
+  const sctData = getDetailedLedgerData();
 
   // Decompose all transactions into individual double-entry bookkeeping lines
   // Returns: { date, docNo, description, debitAcc, creditAcc, amount }
@@ -236,6 +500,20 @@ export default function InAnSoSach() {
           >
             Sổ Cái Tài Khoản
           </button>
+          <button
+            onClick={() => {
+              setSelectedBook('SCT');
+              if (selectedAccCode === '111') {
+                setSelectedAccCode('1121'); // default to cash in bank for high fidelity
+              }
+            }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer ${
+              selectedBook === 'SCT' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+            }`}
+            id="switch-book-sct"
+          >
+            Sổ Chi Tiết Tài Khoản (SCT)
+          </button>
         </div>
       </div>
 
@@ -261,9 +539,9 @@ export default function InAnSoSach() {
             />
           </div>
 
-          {selectedBook === 'SOCAI' && (
+          {(selectedBook === 'SOCAI' || selectedBook === 'SCT') && (
             <div className="flex flex-col">
-              <label className="text-xs font-semibold text-slate-500 mb-1">Chọn tài khoản xem Sổ Cái</label>
+              <label className="text-xs font-semibold text-slate-500 mb-1">Chọn tài khoản xem Sổ</label>
               <select
                 value={selectedAccCode}
                 onChange={(e) => setSelectedAccCode(e.target.value)}
@@ -409,6 +687,149 @@ export default function InAnSoSach() {
                   <td colSpan={4} className="py-4 px-6 text-right text-indigo-950 font-serif">Số dư cuối kỳ kết toán:</td>
                   <td className="py-4 px-6 text-right text-emerald-800 text-base font-black">NỢ: {ledgerData.closingDebit.toLocaleString()} đ</td>
                   <td className="py-4 px-6 text-right text-rose-800 text-base font-black" colSpan={2}>CÓ: {ledgerData.closingCredit.toLocaleString()} đ</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 5C. SỔ CHI TIẾT CÁC TÀI KHOẢN SHEET */}
+      {selectedBook === 'SCT' && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden" id="sct-print-sheet">
+          {/* Organization & Header Metadata as shown in Image 1 */}
+          <div className="p-6 border-b border-emerald-100 bg-emerald-50/5 relative">
+            <div className="absolute top-5 left-6 text-xs text-slate-500 font-bold space-y-0.5">
+              <div className="uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
+              <div className="text-slate-400 font-normal">TP Đà Nẵng</div>
+            </div>
+
+            <div className="text-center pt-8 pb-4 space-y-1">
+              <h3 className="text-2xl font-black text-emerald-950 uppercase tracking-widest font-sans">
+                SỔ CHI TIẾT CÁC TÀI KHOẢN
+              </h3>
+              <p className="text-xs text-emerald-700 font-mono font-bold">
+                Tài khoản: {selectedAccCode} - {accounts.find(a => a.code === selectedAccCode)?.name}; Năm 2026
+              </p>
+              <p className="text-[11px] text-slate-400 italic">Kỳ báo cáo chi tiết: từ {startDate} đến {endDate}</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto text-xs">
+            <table className="w-full text-left border-collapse border border-slate-200">
+              <thead>
+                <tr className="bg-emerald-800 text-white border border-emerald-800 text-center font-bold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-3 border border-emerald-700 w-24">Ngày hạch toán</th>
+                  <th className="py-3 px-3 border border-emerald-700 w-24">Ngày chứng từ</th>
+                  <th className="py-3 px-3 border border-emerald-700 w-24">Số chứng từ</th>
+                  <th className="py-3 px-4 border border-emerald-700 text-left">Diễn giải nội dung bút toán</th>
+                  <th className="py-3 px-2 border border-emerald-700 w-16">Tài khoản</th>
+                  <th className="py-3 px-2 border border-emerald-700 w-16">TK đối ứng</th>
+                  <th className="py-3 px-3 border border-emerald-700 text-right w-28">Phát sinh Nợ</th>
+                  <th className="py-3 px-3 border border-emerald-700 text-right w-28">Phát sinh Có</th>
+                  <th className="py-3 px-3 border border-emerald-700 text-right w-28">Dư Nợ</th>
+                  <th className="py-3 px-3 border border-emerald-700 text-right w-28">Dư Có</th>
+                </tr>
+
+                {/* Beginning Balance Row as shown in Image 1 */}
+                <tr className="bg-amber-50/70 font-semibold border border-slate-200 text-slate-800">
+                  <td className="py-2.5 px-3 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-4 border border-slate-200 text-slate-800 italic font-serif text-sm">
+                    Số dư đầu kỳ hạch toán kết chuyển
+                  </td>
+                  <td className="py-2.5 px-2 border border-slate-200 text-center font-mono text-emerald-800 font-bold">
+                    {selectedAccCode}
+                  </td>
+                  <td className="py-2.5 px-2 border border-slate-200 text-center text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-emerald-700 text-xs font-bold">
+                    {sctData.initialBalDebit > 0 ? sctData.initialBalDebit.toLocaleString() : '-'}
+                  </td>
+                  <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-rose-700 text-xs font-bold">
+                    {sctData.initialBalCredit > 0 ? sctData.initialBalCredit.toLocaleString() : '-'}
+                  </td>
+                </tr>
+              </thead>
+              
+              <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                {sctData.rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="py-12 text-center text-slate-400 font-normal font-sans bg-slate-50/50">
+                      Không phát sinh bất kỳ nghiệp vụ kinh tế nào đối với tài khoản này trong kỳ lọc sổ.
+                    </td>
+                  </tr>
+                ) : (
+                  sctData.rows.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 transition">
+                      <td className="py-2.5 px-3 border border-slate-200 text-center font-mono text-slate-400 text-[10px]">
+                        {row.date}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200 text-center font-mono text-slate-400 text-[10px]">
+                        {row.date}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200">
+                        <span className="font-bold text-slate-800 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded-sm block text-center truncate">
+                          {row.docNo}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 border border-slate-200 font-normal text-slate-650 max-w-xs truncate">
+                        {row.description}
+                      </td>
+                      <td className="py-2.5 px-2 border border-slate-200 text-center font-mono font-bold text-slate-600 text-[10px]">
+                        {row.acc}
+                      </td>
+                      <td className="py-2.5 px-2 border border-slate-200 text-center font-mono font-bold text-indigo-700 bg-indigo-50/40 text-[10px]">
+                        {row.recAcc}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-emerald-600">
+                        {row.debit > 0 ? row.debit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-rose-600">
+                        {row.credit > 0 ? row.credit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-emerald-700">
+                        {row.balDebit > 0 ? row.balDebit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-2.5 px-3 border border-slate-200 text-right font-mono text-rose-700">
+                        {row.balCredit > 0 ? row.balCredit.toLocaleString() : '-'}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+
+              <tfoot className="font-bold border-t border-slate-300 bg-slate-50 text-[11px] font-mono text-slate-800">
+                {/* Cộng phát sinh trong kỳ */}
+                <tr className="border border-slate-200">
+                  <td colSpan={6} className="py-3 px-4 border border-slate-200 text-right text-slate-500 font-serif text-sm">
+                    Cộng phát sinh lũy kế trong kỳ hạch toán:
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-emerald-700 font-black">
+                    {sctData.totalDebit.toLocaleString()}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-rose-700 font-black">
+                    {sctData.totalCredit.toLocaleString()}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                </tr>
+
+                {/* Số dư cuối kỳ */}
+                <tr className="border border-slate-200 bg-emerald-50/30 text-emerald-950">
+                  <td colSpan={6} className="py-3.5 px-4 border border-slate-200 text-right font-serif text-slate-800 text-sm">
+                    Số dư cuối kỳ hạch toán kết chuyển:
+                  </td>
+                  <td className="py-3.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  <td className="py-3.5 px-3 border border-slate-200 text-right text-slate-400 font-mono">-</td>
+                  <td className="py-3.5 px-3 border border-slate-200 text-right text-emerald-900 text-xs font-extrabold">
+                    {sctData.finalBalDebit > 0 ? sctData.finalBalDebit.toLocaleString() : '-'}
+                  </td>
+                  <td className="py-3.5 px-3 border border-slate-200 text-right text-rose-900 text-xs font-extrabold">
+                    {sctData.finalBalCredit > 0 ? sctData.finalBalCredit.toLocaleString() : '-'}
+                  </td>
                 </tr>
               </tfoot>
             </table>

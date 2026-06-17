@@ -12,6 +12,7 @@ export default function CongNo() {
   const { partners, transactions, addPartner } = useAccounting();
   const [selectedAcc, setSelectedAcc] = useState<'131' | '331'>('131');
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('');
+  const [selectedSubTab, setSelectedSubTab] = useState<'TONG_HOP' | 'CHI_TIET'>('TONG_HOP');
   
   // Modal states for creating a new partner
   const [showAddPartnerModal, setShowAddPartnerModal] = useState(false);
@@ -31,20 +32,28 @@ export default function CongNo() {
     return p.type === 'VENDOR' || p.type === 'BOTH';
   });
 
-  // Calculate detailed transactions for a specific partner
-  const getPartnerLedger = (partnerCode: string) => {
+  // Generate detailed rows with real-time running balance for Sổ Chi Tiết Công Nợ
+  const getPartnerLedgerDetailed = (partnerCode: string) => {
     const lines: Array<{
       date: string;
       docNo: string;
       description: string;
+      tkCongNo: string;
+      tkDoiUng: string;
       debit: number;
       credit: number;
+      balDebit: number;
+      balCredit: number;
     }> = [];
 
     const partner = partners.find(p => p.code === partnerCode);
-    if (!partner) return { lines: [], opening: 0 };
+    if (!partner) return { rows: [], initialDebit: 0, initialCredit: 0, finalBalDebit: 0, finalBalCredit: 0, totalDebit: 0, totalCredit: 0 };
 
-    const opening = (selectedAcc === '131' ? partner.openingDebit : partner.openingCredit) || 0;
+    // Determine initial balances
+    const initialDebit = (selectedAcc === '131' ? partner.openingDebit : 0) || 0;
+    const initialCredit = (selectedAcc === '331' ? partner.openingCredit : 0) || 0;
+
+    let runningBal = initialDebit - initialCredit;
 
     transactions.forEach(tx => {
       const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
@@ -58,77 +67,148 @@ export default function CongNo() {
         const totalValue = totalBase + totalTax;
 
         if (tx.loaiHD === 'BR') {
-          // Sales: If debiting 131, it records a DEBIT on 131
+          // Sales: Debits 131, Credits 511 + 33311
           if (tx.tkNo === selectedAcc) {
             lines.push({
               date: dbDate,
               docNo: dbDocNo,
               description: tx.dienGiai,
-              debit: totalValue,
-              credit: 0
+              tkCongNo: tx.tkNo,
+              tkDoiUng: tx.tkCo || '511',
+              debit: totalBase,
+              credit: 0,
+              balDebit: 0,
+              balCredit: 0
             });
+            if (totalTax > 0) {
+              lines.push({
+                date: dbDate,
+                docNo: dbDocNo,
+                description: `Thuế GTGT đầu ra - ${dbDocNo}`,
+                tkCongNo: tx.tkNo,
+                tkDoiUng: '33311',
+                debit: totalTax,
+                credit: 0,
+                balDebit: 0,
+                balCredit: 0
+              });
+            }
           }
         } else {
-          // Purchases: If crediting 331, it records a CREDIT on 331
+          // Purchase: Credits 331, Debits 152/156/642 + 1331
           if (tx.tkCo === selectedAcc) {
             lines.push({
               date: dbDate,
               docNo: dbDocNo,
               description: tx.dienGiai,
+              tkCongNo: tx.tkCo,
+              tkDoiUng: tx.tkNo || '156',
               debit: 0,
-              credit: totalValue
+              credit: totalBase,
+              balDebit: 0,
+              balCredit: 0
             });
+            if (totalTax > 0) {
+              lines.push({
+                date: dbDate,
+                docNo: dbDocNo,
+                description: `Thuế GTGT đầu vào - ${dbDocNo}`,
+                tkCongNo: tx.tkCo,
+                tkDoiUng: '1331',
+                debit: 0,
+                credit: totalTax,
+                balDebit: 0,
+                balCredit: 0
+              });
+            }
           }
         }
       } else {
-        // Journal Voucher double entry split lines
+        // Journal Voucher (PHIEUKT)
         if (tx.maKH !== partnerCode) return;
+
+        const debits = tx.lines.filter(l => l.loaiTK === 'No');
+        const credits = tx.lines.filter(l => l.loaiTK === 'Co');
 
         tx.lines.forEach(line => {
           if (line.soTK.startsWith(selectedAcc)) {
+            let tkDoiUng = '';
+            if (line.loaiTK === 'No') {
+              tkDoiUng = credits.length > 0 ? credits[0].soTK : '111';
+            } else {
+              tkDoiUng = debits.length > 0 ? debits[0].soTK : '111';
+            }
+
             lines.push({
               date: dbDate,
               docNo: dbDocNo,
               description: line.dienGiai || tx.dienGiai,
+              tkCongNo: line.soTK,
+              tkDoiUng: tkDoiUng,
               debit: line.psNo,
-              credit: line.psCo
+              credit: line.psCo,
+              balDebit: 0,
+              balCredit: 0
             });
           }
         });
       }
     });
 
+    // Sort by date
+    lines.sort((a,b) => a.date.localeCompare(b.date));
+
+    // Calculate running balance row by row
+    const rows = lines.map(l => {
+      runningBal += l.debit - l.credit;
+      return {
+        ...l,
+        balDebit: runningBal >= 0 ? runningBal : 0,
+        balCredit: runningBal < 0 ? Math.abs(runningBal) : 0
+      };
+    });
+
+    const finalBalDebit = runningBal >= 0 ? runningBal : 0;
+    const finalBalCredit = runningBal < 0 ? Math.abs(runningBal) : 0;
+    const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
+    const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
+
     return {
-      lines: lines.sort((a, b) => a.date.localeCompare(b.date)),
-      opening
+      rows,
+      initialDebit,
+      initialCredit,
+      finalBalDebit,
+      finalBalCredit,
+      totalDebit,
+      totalCredit
     };
   };
 
-  // Compute a summary calculation of ALL partners
-  const getPartnersSummary = () => {
+  // Compute a detailed summary calculation of ALL partners
+  const getPartnersSummaryDetailed = () => {
     return currentPartners.map(p => {
-      const { lines, opening } = getPartnerLedger(p.code);
-      const totalDebit = lines.reduce((sum, l) => sum + l.debit, 0);
-      const totalCredit = lines.reduce((sum, l) => sum + l.credit, 0);
-      
-      const ending = selectedAcc === '131' 
-        ? (opening + totalDebit - totalCredit)
-        : (opening + totalCredit - totalDebit);
+      const detailed = getPartnerLedgerDetailed(p.code);
+      const totalDebit = detailed.rows.reduce((sum, r) => sum + r.debit, 0);
+      const totalCredit = detailed.rows.reduce((sum, r) => sum + r.credit, 0);
+
+      const net = (detailed.initialDebit + totalDebit) - (detailed.initialCredit + totalCredit);
 
       return {
         partner: p,
-        opening,
+        openingDebit: detailed.initialDebit,
+        openingCredit: detailed.initialCredit,
         debit: totalDebit,
         credit: totalCredit,
-        ending: ending > 0 ? ending : 0,
-        endingOpposite: ending < 0 ? Math.abs(ending) : 0
+        endingDebit: net >= 0 ? net : 0,
+        endingCredit: net < 0 ? Math.abs(net) : 0
       };
     });
   };
 
-  const summaryData = getPartnersSummary();
-  const selectedPartnerSummary = selectedPartnerCode ? getPartnerLedger(selectedPartnerCode) : null;
-  const activePartner = partners.find(p => p.code === selectedPartnerCode);
+  const summaryData = getPartnersSummaryDetailed();
+  const activePartner = partners.find(p => p.code === selectedPartnerCode) || currentPartners[0] || null;
+  const activePartnerCode = activePartner ? activePartner.code : '';
+  const selectedPartnerSummary = activePartnerCode ? getPartnerLedgerDetailed(activePartnerCode) : null;
 
   const handleAddNewPartnerSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +249,7 @@ export default function CongNo() {
             </span>
             Kế toán Công nợ Phải Thu - Phải Trả
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Phân hệ theo dõi công nợ chi tiết, quản lý danh sách nhà cung cấp (331) và khách hàng (131)</p>
+          <p className="text-sm text-slate-500 mt-1">Phân hệ theo dõi công nợ chi tiết, quản lý danh sách nhà cung cấp (331) và khách hàng (131) theo TT 133</p>
         </div>
 
         <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
@@ -200,16 +280,53 @@ export default function CongNo() {
         </div>
       </div>
 
-      {/* Grid of Summary Scorecards vs Directory selection */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left column: Summary list of all partners */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <h3 className="font-semibold text-slate-700 text-sm flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-500" />
-              Bảng Tổng Hợp Công Nợ (Tài khoản {selectedAcc})
-            </h3>
+      {/* Sub-tab Switcher Bar */}
+      <div className="flex bg-white p-1 rounded-xl border border-slate-100 shadow-xs max-w-2xl">
+        <button
+          onClick={() => setSelectedSubTab('TONG_HOP')}
+          className={`flex-1 transition-all duration-200 py-2.5 px-4 rounded-lg text-xs font-bold cursor-pointer text-center ${
+            selectedSubTab === 'TONG_HOP'
+              ? 'bg-slate-800 text-white shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+          id="subtab-tong-hop"
+        >
+          {selectedAcc === '131' ? 'Bảng Tổng Hợp Công Nợ Phải Thu (131)' : 'Bảng Tổng Hợp Công Nợ Phải Trả (331)'}
+        </button>
+        <button
+          onClick={() => {
+            setSelectedSubTab('CHI_TIET');
+            if (!selectedPartnerCode && currentPartners.length > 0) {
+              setSelectedPartnerCode(currentPartners[0].code);
+            }
+          }}
+          className={`flex-1 transition-all duration-200 py-2.5 px-4 rounded-lg text-xs font-bold cursor-pointer text-center ${
+            selectedSubTab === 'CHI_TIET'
+              ? 'bg-slate-800 text-white shadow-xs'
+              : 'text-slate-500 hover:text-slate-800'
+          }`}
+          id="subtab-chi-tiet"
+        >
+          {selectedAcc === '131' ? 'Sổ Chi Tiết Công Nợ Khách Hàng (131)' : 'Sổ Chi Tiết Công Nợ Nhà Cung Cấp (331)'}
+        </button>
+      </div>
+
+      {/* RENDER CONDITIONAL 1: BẢNG TỔNG HỢP CÔNG NỢ */}
+      {selectedSubTab === 'TONG_HOP' && (
+        <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden flex flex-col" id="ar-ap-tonghop-sheet">
+          <div className="p-6 border-b border-slate-200 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="text-xs text-slate-500 font-bold uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
+              <div className="text-[11px] text-slate-400 font-normal">TP Đà Nẵng</div>
+              
+              <h3 className="text-xl font-black text-slate-800 tracking-wider uppercase mt-3">
+                {selectedAcc === '131' 
+                  ? 'BẢNG TỔNG HỢP CÔNG NỢ PHẢI THU KHÁCH HÀNG' 
+                  : 'BẢNG TỔNG HỢP CÔNG NỢ PHẢI TRẢ NHÀ CUNG CẤP'}
+              </h3>
+              <p className="text-xs text-slate-500 font-mono mt-0.5">Tài khoản hạch toán: {selectedAcc} - Năm tài chính 2026</p>
+            </div>
+
             <button
               onClick={() => {
                 setNewPartner(prev => ({
@@ -218,153 +335,312 @@ export default function CongNo() {
                 }));
                 setShowAddPartnerModal(true);
               }}
-              className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-1 cursor-pointer"
-              id="add-new-partner-btn"
+              className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-1.5 cursor-pointer self-start md:self-center shadow-xs"
+              id="add-new-partner-tonghop-btn"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Khai báo Đối tác
+              <Plus className="w-4 h-4" />
+              Thêm mới khách hàng
             </button>
           </div>
 
-          <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse border border-slate-200 text-slate-700">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-semibold uppercase tracking-wider">
-                  <th className="py-3 px-4">Mã ĐT</th>
-                  <th className="py-3 px-4">Tên đơn vị đối tác</th>
-                  <th className="py-3 px-4 text-right">Dư đầu kỳ</th>
-                  <th className="py-3 px-4 text-right">Phát sinh Tăng</th>
-                  <th className="py-3 px-4 text-right">Phát sinh Giảm</th>
-                  <th className="py-3 px-4 text-right">Dư cuối kỳ</th>
-                  <th className="py-3 px-4 text-center">Tác vụ</th>
+                <tr className="bg-slate-100 text-slate-700 border-b border-slate-300 text-center uppercase tracking-wider font-extrabold text-[10px]">
+                  <th className="py-3 px-4 border border-slate-200" rowSpan={2}>Mã ĐT</th>
+                  <th className="py-3 px-4 border border-slate-200 text-left" rowSpan={2} style={{ minWidth: '220px' }}>Tên đối tượng hạch toán</th>
+                  <th className="py-2.5 px-3 border border-slate-200" colSpan={2}>Số dư đầu kỳ</th>
+                  <th className="py-2.5 px-3 border border-slate-200" colSpan={2}>Số phát sinh trong kỳ</th>
+                  <th className="py-2.5 px-3 border border-slate-200" colSpan={2}>Số dư cuối kỳ</th>
+                  <th className="py-3 px-3 border border-slate-200" rowSpan={2}>Tác vụ</th>
+                </tr>
+                <tr className="bg-slate-50 text-slate-600 border-b border-slate-250 font-bold text-[9px] uppercase">
+                  <th className="py-2 px-3 border border-slate-200 text-right w-24">Nợ</th>
+                  <th className="py-2 px-3 border border-slate-200 text-right w-24">Có</th>
+                  <th className="py-2 px-3 border border-slate-200 text-right w-24">Nợ</th>
+                  <th className="py-2 px-3 border border-slate-200 text-right w-24">Có</th>
+                  <th className="py-2 px-3 border border-slate-200 text-right w-32">Nợ</th>
+                  <th className="py-2 px-3 border border-slate-200 text-right w-32">Có</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700 font-medium text-sm">
-                {summaryData.map((row, idx) => {
-                  const isSelected = selectedPartnerCode === row.partner.code;
-                  return (
-                    <tr
-                      key={idx}
-                      className={`hover:bg-slate-50/70 transition cursor-pointer ${
-                        isSelected ? 'bg-indigo-50/40 text-indigo-900 border-l-4 border-l-indigo-600' : ''
-                      }`}
-                      onClick={() => setSelectedPartnerCode(row.partner.code)}
-                    >
-                      <td className="py-3.5 px-4 font-mono text-xs">{row.partner.code}</td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-semibold text-slate-800 line-clamp-1">{row.partner.name}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5 font-mono">MST: {row.partner.taxCode || 'Chưa cập nhật'}</div>
+              <tbody className="divide-y divide-slate-150 text-xs text-slate-800">
+                {summaryData.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-12 text-center text-slate-400 font-normal bg-slate-50/50">
+                      Chưa khai báo đối tác hoặc phát sinh hạch toán công nợ nào thuộc tài khoản này.
+                    </td>
+                  </tr>
+                ) : (
+                  summaryData.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 transition">
+                      <td className="py-3 px-4 border border-slate-200 font-mono text-center font-bold text-slate-600">
+                        {row.partner.code}
                       </td>
-                      <td className="py-3.5 px-4 text-right font-mono text-slate-600">{row.opening.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 text-right font-mono text-emerald-600">+{row.debit.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 text-right font-mono text-rose-600">-{row.credit.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 text-right font-mono text-indigo-700 font-bold">{row.ending.toLocaleString()}</td>
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-3 px-4 border border-slate-200">
+                        <div className="font-semibold text-slate-900">{row.partner.name}</div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">MST: {row.partner.taxCode || 'N/A'} - ĐC: {row.partner.address || 'N/A'}</div>
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-slate-600">
+                        {row.openingDebit > 0 ? row.openingDebit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-slate-600">
+                        {row.openingCredit > 0 ? row.openingCredit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-emerald-600 font-semibold">
+                        {row.debit > 0 ? `+${row.debit.toLocaleString()}` : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-rose-600 font-semibold">
+                        {row.credit > 0 ? `-${row.credit.toLocaleString()}` : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-indigo-700 font-bold bg-indigo-50/10">
+                        {row.endingDebit > 0 ? row.endingDebit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-right font-mono text-rose-700 font-bold bg-rose-50/10">
+                        {row.endingCredit > 0 ? row.endingCredit.toLocaleString() : '-'}
+                      </td>
+                      <td className="py-3 px-3 border border-slate-200 text-center">
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() => {
                             setSelectedPartnerCode(row.partner.code);
+                            setSelectedSubTab('CHI_TIET');
                           }}
-                          className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs cursor-pointer inline-flex items-center gap-1 font-sans"
+                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-[11px] font-bold cursor-pointer inline-flex items-center gap-1 transition"
                         >
-                          Chi tiết
-                          <ChevronRight className="w-3 h-3" />
+                          Sổ chi tiết
+                          <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       </td>
                     </tr>
-                  );
-                })}
+                  ))
+                )}
               </tbody>
+
+              <tfoot className="bg-slate-50 border-t-2 border-slate-300 font-bold font-mono text-xs text-slate-900">
+                <tr className="border border-slate-200">
+                  <td colSpan={2} className="py-3 px-4 text-right text-slate-600 font-serif text-sm">
+                    Cộng cộng dòng tổng hợp lũy kế:
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-slate-700">
+                    {summaryData.reduce((s, r) => s + r.openingDebit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.openingDebit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-slate-700">
+                    {summaryData.reduce((s, r) => s + r.openingCredit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.openingCredit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-emerald-800">
+                    {summaryData.reduce((s, r) => s + r.debit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.debit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-rose-800">
+                    {summaryData.reduce((s, r) => s + r.credit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.credit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-indigo-900 text-sm font-extrabold bg-indigo-50/20">
+                    {summaryData.reduce((s, r) => s + r.endingDebit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.endingDebit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 text-right text-rose-900 text-sm font-extrabold bg-rose-50/20">
+                    {summaryData.reduce((s, r) => s + r.endingCredit, 0) > 0 
+                      ? summaryData.reduce((s, r) => s + r.endingCredit, 0).toLocaleString() 
+                      : '-'}
+                  </td>
+                  <td className="py-3 px-3 border border-slate-200 bg-slate-50 text-slate-400 font-mono font-normal text-center">-</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </div>
+      )}
 
-        {/* Right column: Detailed ledger for the selected partner */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-          <div className="p-5 border-b border-indigo-100 bg-indigo-50/30">
-            <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-600" />
-              Sổ Chi Tiết Công Nợ Đối Tác
-            </h3>
-            <p className="text-xs text-slate-500 mt-1">Chọn một dòng đối tác ở bên trái để theo dõi</p>
+      {/* RENDER CONDITIONAL 2: SỔ CHI TIẾT CÔNG NỢ */}
+      {selectedSubTab === 'CHI_TIET' && (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left panel: Quick partner selector */}
+          <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-100 shadow-sm p-4 flex flex-col gap-3">
+            <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest px-2">Danh sách đối tác công nợ</h4>
+            
+            <div className="space-y-1 overflow-y-auto max-h-[500px]" id="partner-ledger-list">
+              {currentPartners.map((p, idx) => {
+                const isSelected = activePartnerCode === p.code;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedPartnerCode(p.code)}
+                    className={`w-full text-left p-3 rounded-xl transition cursor-pointer flex flex-col gap-1 ${
+                      isSelected 
+                        ? 'bg-slate-800 text-white shadow-xs' 
+                        : 'hover:bg-slate-100/80 text-slate-700'
+                    }`}
+                  >
+                    <span className="font-mono text-[11px] font-bold tracking-tight opacity-75">{p.code}</span>
+                    <span className="text-xs font-bold truncate line-clamp-1">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          {selectedPartnerSummary && activePartner ? (
-            <div className="p-5 space-y-5 flex-1 flex flex-col justify-between">
+          {/* Right panel: Full Excel-themed printable ledger sheet as requested in Image 2 & 3 */}
+          <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden flex flex-col">
+            {selectedPartnerSummary && activePartner ? (
               <div>
-                <div className="bg-slate-100 p-4 rounded-xl space-y-1 text-xs">
-                  <h4 className="font-bold text-slate-800 text-sm">{activePartner.name}</h4>
-                  <p className="text-slate-500"><strong>Mã Số Thuế:</strong> {activePartner.taxCode}</p>
-                  <p className="text-slate-500"><strong>Đại diện:</strong> {activePartner.address}</p>
-                </div>
+                <div className="p-6 border-b border-indigo-100 bg-indigo-50/5 relative">
+                  <div className="absolute top-5 left-6 text-xs text-slate-500 font-bold space-y-0.5">
+                    <div className="subtitle-logo uppercase tracking-wider">CÔNG TY TNHH THƯƠNG MẠI TỔNG HỢP ABC</div>
+                    <div className="text-slate-400 font-normal">TP Đà Nẵng</div>
+                  </div>
 
-                <div className="mt-4 space-y-3">
-                  <h5 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Các nghiệp vụ phát sinh</h5>
-                  
-                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                    {selectedPartnerSummary.lines.length === 0 ? (
-                      <div className="text-center py-8 text-xs text-slate-400 font-normal">
-                        Chưa phát sinh hạch toán nợ nào trong kỳ.
-                      </div>
-                    ) : (
-                      selectedPartnerSummary.lines.map((line, lidx) => (
-                        <div key={lidx} className="flex justify-between items-center bg-slate-50 p-2.5 hover:bg-slate-100 rounded-lg transition text-xs">
-                          <div className="space-y-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-indigo-700">{line.docNo}</span>
-                              <span className="text-[10px] text-slate-400 font-mono">{line.date}</span>
-                            </div>
-                            <div className="text-slate-500 font-normal max-w-[180px] truncate">{line.description}</div>
-                          </div>
-                          <div className="text-right font-mono">
-                            {line.debit > 0 && <span className="text-emerald-600 block">+{line.debit.toLocaleString()}</span>}
-                            {line.credit > 0 && <span className="text-rose-600 block">-{line.credit.toLocaleString()}</span>}
-                          </div>
-                        </div>
-                      ))
-                    )}
+                  <div className="text-center pt-8 pb-3 space-y-1">
+                    <h3 className="text-2xl font-black text-slate-900 tracking-wider font-sans uppercase">
+                      SỔ CHI TIẾT CÔNG NỢ KHÁCH HÀNG (131)
+                    </h3>
+                    <p className="text-xs font-mono text-indigo-700 font-bold">
+                      Tài khoản liên kết: {selectedAcc} - Năm 2026
+                    </p>
+                    <div className="text-[11px] text-slate-500 italic max-w-md mx-auto line-clamp-1">
+                      Khách hàng: <span className="font-bold font-sans text-xs underline text-slate-800">{activePartner.name}</span> (Mã {activePartner.code})
+                    </div>
+                  </div>
+
+                  <div className="mt-4 bg-slate-100 p-3 rounded-lg text-[11px] text-slate-600 font-serif grid grid-cols-2 gap-3 max-w-xl mx-auto">
+                    <div><strong>Mã số thuế:</strong> {activePartner.taxCode || 'N/A'}</div>
+                    <div><strong>Đại diện / Địa chỉ giao dịch:</strong> {activePartner.address || 'N/A'}</div>
                   </div>
                 </div>
-              </div>
 
-              {/* Summary box */}
-              <div className="pt-4 border-t border-slate-100 bg-slate-50 p-3.5 rounded-xl text-xs space-y-1.5">
-                <div className="flex justify-between text-slate-500">
-                  <span>Dư đầu kỳ:</span>
-                  <span className="font-mono">{selectedPartnerSummary.opening.toLocaleString()} đ</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>Tổng phát sinh tăng:</span>
-                  <span className="font-mono text-emerald-600">
-                    +{selectedPartnerSummary.lines.reduce((s, l) => s + l.debit, 0).toLocaleString()} đ
-                  </span>
-                </div>
-                <div className="flex justify-between text-slate-500 font-normal">
-                  <span>Tổng phát sinh giảm:</span>
-                  <span className="font-mono text-rose-600">
-                    -{selectedPartnerSummary.lines.reduce((s, l) => s + l.credit, 0).toLocaleString()} đ
-                  </span>
-                </div>
-                <div className="flex justify-between font-bold text-sm text-slate-800 pt-1.5 border-t border-dashed border-slate-200">
-                  <span>Dư cuối kỳ hạch toán:</span>
-                  <span className="font-mono text-indigo-700">
-                    {(
-                      selectedPartnerSummary.opening +
-                      selectedPartnerSummary.lines.reduce((s, l) => s + (selectedAcc === '131' ? l.debit - l.credit : l.credit - l.debit), 0)
-                    ).toLocaleString()} đ
-                  </span>
+                <div className="overflow-x-auto text-[11px]">
+                  <table className="w-full text-left border-collapse border border-slate-200">
+                    <thead>
+                      <tr className="bg-slate-900 text-white border-b border-slate-700 text-center font-bold uppercase text-[10px]">
+                        <th className="py-2.5 px-2.5 border border-slate-700 w-24">Ngày hạch toán</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 w-24">Ngày chứng từ</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 w-20">Số chứng từ</th>
+                        <th className="py-2.5 px-3 border border-slate-700 text-left">Nội dung diễn giải chi tiết</th>
+                        <th className="py-2.5 px-2 border border-slate-700 w-14">TK công nợ</th>
+                        <th className="py-2.5 px-2 border border-slate-700 w-14">TK đối ứng</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 text-right w-24">Phát sinh Nợ</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 text-right w-24">Phát sinh Có</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 text-right w-24">Số dư Nợ</th>
+                        <th className="py-2.5 px-2.5 border border-slate-700 text-right w-24">Số dư Có</th>
+                      </tr>
+
+                      {/* Opening Balance Row */}
+                      <tr className="bg-amber-50 text-amber-950 font-bold border border-slate-200">
+                        <td className="py-2 px-2.5 border border-slate-200 text-center font-mono opacity-50">-</td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-center font-mono opacity-50">-</td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-center font-mono opacity-50">-</td>
+                        <td className="py-2 px-3 border border-slate-200 italic font-serif text-slate-700">
+                          Số dư công nợ tích lũy đầu kỳ kết chuyển
+                        </td>
+                        <td className="py-2 px-2 border border-slate-200 text-center font-mono text-slate-500 font-normal">{selectedAcc}</td>
+                        <td className="py-2 px-2 border border-slate-200 text-center font-mono opacity-50">-</td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-right opacity-50 font-mono">-</td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-right opacity-50 font-mono">-</td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-right text-emerald-800 font-mono font-black">
+                          {selectedPartnerSummary.initialDebit > 0 ? selectedPartnerSummary.initialDebit.toLocaleString() : '-'}
+                        </td>
+                        <td className="py-2 px-2.5 border border-slate-200 text-right text-rose-840 font-mono font-black">
+                          {selectedPartnerSummary.initialCredit > 0 ? selectedPartnerSummary.initialCredit.toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {selectedPartnerSummary.rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="py-12 text-center text-slate-400 font-normal bg-slate-50/50">
+                            Không phát sinh giao dịch công nợ phải thu/trả nào đối với đối tác này trong kỳ hạch toán.
+                          </td>
+                        </tr>
+                      ) : (
+                        selectedPartnerSummary.rows.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/50 transition">
+                            <td className="py-2 px-2.5 border border-slate-200 text-center font-mono text-slate-400 text-[10px]">
+                              {row.date}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200 text-center font-mono text-slate-400 text-[10px]">
+                              {row.date}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200">
+                              <span className="font-bold text-slate-800 text-[9px] bg-slate-100 px-1 py-0.5 rounded-sm block text-center truncate">
+                                {row.docNo}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 border border-slate-200 max-w-xs truncate font-normal">
+                              {row.description}
+                            </td>
+                            <td className="py-2 px-2 border border-slate-200 text-center font-mono text-slate-500 font-bold">
+                              {row.tkCongNo}
+                            </td>
+                            <td className="py-2 px-2 border border-slate-200 text-center font-mono text-indigo-700 bg-indigo-50/55 font-black text-[10px]">
+                              {row.tkDoiUng}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200 text-right font-mono text-emerald-600">
+                              {row.debit > 0 ? row.debit.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200 text-right font-mono text-rose-600">
+                              {row.credit > 0 ? row.credit.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200 text-right font-mono text-emerald-700 bg-emerald-50/20">
+                              {row.balDebit > 0 ? row.balDebit.toLocaleString() : '-'}
+                            </td>
+                            <td className="py-2 px-2.5 border border-slate-200 text-right font-mono text-rose-700 bg-rose-50/20">
+                              {row.balCredit > 0 ? row.balCredit.toLocaleString() : '-'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+
+                    <tfoot className="font-bold text-slate-900 font-mono text-xs bg-slate-50 text-[11px]">
+                      {/* Period Debits Sum */}
+                      <tr className="border border-slate-200">
+                        <td colSpan={6} className="py-2.5 px-3 border border-slate-200 text-right text-slate-500 font-serif">
+                          Cộng phát sinh trong kỳ hạch toán:
+                        </td>
+                        <td className="py-2.5 px-2.5 border border-slate-200 text-right text-emerald-700">
+                          {selectedPartnerSummary.totalDebit.toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-2.5 border border-slate-200 text-right text-rose-700">
+                          {selectedPartnerSummary.totalCredit.toLocaleString()}
+                        </td>
+                        <td className="py-2.5 px-2.5 border border-slate-200 text-right text-slate-400 font-mono font-normal">-</td>
+                        <td className="py-2.5 px-2.5 border border-slate-200 text-right text-slate-400 font-mono font-normal">-</td>
+                      </tr>
+
+                      {/* Period Ending Balance */}
+                      <tr className="border border-slate-200 bg-slate-100/50">
+                        <td colSpan={6} className="py-3 px-3 border border-slate-200 text-right font-serif text-slate-800">
+                          Số dư cuối kỳ báo cáo kết chuyển:
+                        </td>
+                        <td className="py-3 px-2.5 border border-slate-200 text-right text-slate-400 font-mono font-normal">-</td>
+                        <td className="py-3 px-2.5 border border-slate-200 text-right text-slate-400 font-mono font-normal">-</td>
+                        <td className="py-3 px-2.5 border border-slate-200 text-right text-emerald-800 font-black text-xs">
+                          {selectedPartnerSummary.finalBalDebit > 0 ? selectedPartnerSummary.finalBalDebit.toLocaleString() : '-'}
+                        </td>
+                        <td className="py-3 px-2.5 border border-slate-200 text-right text-rose-800 font-black text-xs">
+                          {selectedPartnerSummary.finalBalCredit > 0 ? selectedPartnerSummary.finalBalCredit.toLocaleString() : '-'}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
               </div>
-
-            </div>
-          ) : (
-            <div className="p-8 text-center text-slate-400 italic font-normal flex-1 flex flex-col justify-center items-center gap-2">
-              <AlertCircle className="w-8 h-8 text-slate-300" />
-              Vui lòng nhấp chọn một đối tác bên cột trái để hiển thị chi tiết lịch sử mua bán và đối chiếu công nợ.
-            </div>
-          )}
+            ) : (
+              <div className="py-16 text-center text-slate-400 italic font-normal flex flex-col justify-center items-center gap-2">
+                <AlertCircle className="w-8 h-8 text-slate-300" />
+                Vui lòng nhấp chọn một đối tác bên cột trái để khởi động màn hình đối chiếu chi tiết.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* MODAL THÊM ĐỐI TÁC MỚI */}
       {showAddPartnerModal && (
@@ -413,7 +689,7 @@ export default function CongNo() {
                 />
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-1 flex-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase">Mã số thuế (MST)</label>
                 <input
                   type="text"

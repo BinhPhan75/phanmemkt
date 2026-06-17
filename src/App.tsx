@@ -12,6 +12,7 @@ import KeToanThue from './components/KeToanThue';
 import InAnSoSach from './components/InAnSoSach';
 import BaoCaoTaiChinh from './components/BaoCaoTaiChinh';
 import NhapLieu from './components/NhapLieu';
+import { getSupabaseConfig, saveSupabaseConfig } from './utils/supabaseService';
 
 import { 
   Briefcase, 
@@ -33,20 +34,17 @@ import {
 
 export default function App() {
   const { 
-    supabaseUrl, 
-    supabaseAnonKey, 
-    saveSupabaseConfig, 
     syncWithCloud, 
-    loadFromCloud, 
-    isLoaded 
   } = useAccounting();
 
   const [activeTab, setActiveTab] = useState<'QUY' | 'CONG_NO' | 'KHO' | 'THUE' | 'SO_SACH' | 'BCTC' | 'NHAP_LIEU'>('NHAP_LIEU');
   
   // Supabase Settings overlay drawer state
   const [showSettings, setShowSettings] = useState(false);
-  const [urlInput, setUrlInput] = useState(supabaseUrl || '');
-  const [keyInput, setKeyInput] = useState(supabaseAnonKey || '');
+  
+  const initialConfig = getSupabaseConfig();
+  const [urlInput, setUrlInput] = useState(initialConfig?.url || '');
+  const [keyInput, setKeyInput] = useState(initialConfig?.anonKey || '');
   const [copiedSql, setCopiedSql] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
 
@@ -93,14 +91,14 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    saveSupabaseConfig(urlInput, keyInput);
+    saveSupabaseConfig({ url: urlInput, anonKey: keyInput });
     setSyncStatusMsg('Đã cấu hình Supabase cục bộ thành công!');
     setTimeout(() => setSyncStatusMsg(''), 3000);
   };
 
   const handlePushCloud = async () => {
     setSyncStatusMsg('Đang đóng gói và đẩy đồng bộ dữ liệu lên Cloud...');
-    const ok = await syncWithCloud();
+    const ok = await syncWithCloud('upload');
     if (ok) {
       setSyncStatusMsg('Đồng bộ Cloud thành công! Dữ liệu đã an toàn.');
     } else {
@@ -111,7 +109,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 
   const handlePullCloud = async () => {
     setSyncStatusMsg('Đang tải dữ liệu từ Supabase về trình duyệt...');
-    const ok = await loadFromCloud();
+    const ok = await syncWithCloud('download');
     if (ok) {
       setSyncStatusMsg('Đã kết chuyển hoàn tất cơ sở dữ liệu từ Cloud!');
     } else {

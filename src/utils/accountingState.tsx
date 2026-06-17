@@ -40,7 +40,7 @@ interface AccountingState {
     error: string | null;
     success: string | null;
   };
-  syncWithCloud: (direction: 'upload' | 'download') => Promise<void>;
+  syncWithCloud: (direction: 'upload' | 'download') => Promise<boolean>;
   importState: (data: any) => void;
 }
 
@@ -159,7 +159,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   // Sync state between LocalStorage and Supabase backend
-  const syncWithCloud = async (direction: 'upload' | 'download') => {
+  const syncWithCloud = async (direction: 'upload' | 'download'): Promise<boolean> => {
     const config = getSupabaseConfig();
     if (!config || !config.url || !config.anonKey) {
       setCloudSyncStatus({
@@ -167,7 +167,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         error: 'Chưa cấu hình tài khoản kết nối Supabase Cloud. Vui lòng vào phân hệ Cấu hình để thiết lập.',
         success: null
       });
-      return;
+      return false;
     }
 
     setCloudSyncStatus({ loading: true, error: null, success: null });
@@ -201,6 +201,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           success: `Đồng bộ từ đám mây Supabase về máy thành công lúc ${new Date().toLocaleTimeString()}! Đã tải xuống ${cloudData.accounts.length} TK, ${cloudData.partners.length} đối tác, ${cloudData.items.length} vật tư và ${cloudData.transactions.length} chứng từ hạch toán.`
         });
       }
+      return true;
     } catch (err: any) {
       console.error(err);
       setCloudSyncStatus({
@@ -208,6 +209,7 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         error: `Đồng bộ thất bại: ${err?.message || 'Có lỗi kết nối diễn ra'}`,
         success: null
       });
+      return false;
     }
   };
 

@@ -6,16 +6,140 @@
 import React, { useState } from 'react';
 import { useAccounting } from '../utils/accountingState';
 import { AccountingTransaction } from '../types';
-import { FileDown, FileUp, Printer, DollarSign, Wallet, ArrowUpRight, ArrowDownRight, Users } from 'lucide-react';
+import { FileDown, FileUp, Printer, DollarSign, Wallet, ArrowUpRight, ArrowDownRight, Users, Plus, X, CreditCard } from 'lucide-react';
 
 export default function QuyTienMat() {
-  const { transactions, partners } = useAccounting();
+  const { transactions, partners, accounts, addTransaction, companyInfo } = useAccounting() as any;
   const [selectedAcc, setSelectedAcc] = useState<'111' | '112'>('111');
   const [filterStartDate, setFilterStartDate] = useState('2026-06-01');
   const [filterEndDate, setFilterEndDate] = useState('2026-06-30');
   
   // Voucher Printing state
   const [printVoucher, setPrintVoucher] = useState<any | null>(null);
+
+  // New voucher entry form state
+  const [showVoucherModal, setShowVoucherModal] = useState(false);
+  const [voucherType, setVoucherType] = useState<'PT' | 'PC' | 'BN' | 'BC'>('PT');
+  const [formDate, setFormDate] = useState('2026-06-15');
+  const [formPartnerCode, setFormPartnerCode] = useState('');
+  const [formReciprocalAcc, setFormReciprocalAcc] = useState('');
+  const [formAmount, setFormAmount] = useState<number | ''>('');
+  const [formDescription, setFormDescription] = useState('');
+
+  const formatDateDMY = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`; // dd/mm/yyyy
+    }
+    return dateStr;
+  };
+
+  const generateVoucherNo = (prefix: 'PT' | 'PC' | 'BN' | 'BC') => {
+    const currentYear = filterStartDate.split('-')[0] || '2026';
+    const prefixFull = `${prefix}/${currentYear}/`; // e.g. "PT/2026/"
+    
+    let maxSeq = 0;
+    transactions.forEach((tx: any) => {
+      const code = tx.type === 'HOADON' ? tx.soHD : tx.soCT;
+      if (code && code.startsWith(prefixFull)) {
+        const part = code.substring(prefixFull.length);
+        const parsed = parseInt(part, 10);
+        if (!isNaN(parsed) && parsed > maxSeq) {
+          maxSeq = parsed;
+        }
+      } else if (code && code.includes(`/${currentYear}/`)) {
+        if (code.startsWith(prefix)) {
+          const parts = code.split('/');
+          const lastPart = parts[parts.length - 1];
+          const parsed = parseInt(lastPart, 10);
+          if (!isNaN(parsed) && parsed > maxSeq) {
+            maxSeq = parsed;
+          }
+        }
+      }
+    });
+    
+    const nextSeq = maxSeq + 1;
+    const seqStr = nextSeq.toString().padStart(3, '0'); // e.g., "001", "002"
+    return `${prefixFull}${seqStr}`;
+  };
+
+  const openVoucherModal = (type: 'PT' | 'PC' | 'BN' | 'BC') => {
+    setVoucherType(type);
+    setFormDate('2026-06-15');
+
+    if (partners && partners.length > 0) {
+      setFormPartnerCode(partners[0].code);
+    } else {
+      setFormPartnerCode('');
+    }
+
+    if (type === 'PT' || type === 'BC') {
+      setFormReciprocalAcc('131');
+    } else {
+      setFormReciprocalAcc('331');
+    }
+
+    setFormAmount('');
+    setFormDescription(
+      type === 'PT' ? 'Thu tiền bán hàng / Khách hàng thanh toán' :
+      type === 'PC' ? 'Chi thanh toán tiền hàng cho Nhà cung cấp' :
+      type === 'BC' ? 'Báo có lãi tiền gửi / Khách hàng chuyển khoản' :
+      'Thanh toán nợ vay / Chi thanh toán dịch vụ bằng TGNH'
+    );
+    setShowVoucherModal(true);
+  };
+
+  const handleAddVoucherSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formAmount || Number(formAmount) <= 0) {
+      alert('Vui lòng nhập số tiền lớn hơn 0');
+      return;
+    }
+
+    const typePrefix = voucherType;
+    const generatedNo = generateVoucherNo(typePrefix);
+
+    const isReceipt = (typePrefix === 'PT' || typePrefix === 'BC');
+    const cashOrBankAcc = selectedAcc === '111' ? '111' : '112';
+    const cashOrBankName = selectedAcc === '111' ? 'Tiền mặt' : 'Tiền gửi ngân hàng';
+    const reciprocalAccName = accounts.find((a: any) => a.code === formReciprocalAcc)?.name || 'Tài khoản đối ứng';
+
+    const newTx: any = {
+      id: `TX-${Date.now()}`,
+      type: 'PHIEUKT',
+      ngayCT: formDate,
+      ngayGS: formDate,
+      soCT: generatedNo,
+      maKH: formPartnerCode,
+      dienGiai: formDescription,
+      lines: [
+        {
+          id: `L-${Date.now()}-1`,
+          loaiTK: isReceipt ? 'No' : 'Co',
+          soTK: cashOrBankAcc,
+          tenTK: cashOrBankName,
+          psNo: isReceipt ? Number(formAmount) : 0,
+          psCo: isReceipt ? 0 : Number(formAmount),
+          dienGiai: formDescription
+        },
+        {
+          id: `L-${Date.now()}-2`,
+          loaiTK: isReceipt ? 'Co' : 'No',
+          soTK: formReciprocalAcc,
+          tenTK: reciprocalAccName,
+          psNo: isReceipt ? 0 : Number(formAmount),
+          psCo: isReceipt ? Number(formAmount) : 0,
+          dienGiai: formDescription
+        }
+      ]
+    };
+
+    addTransaction(newTx);
+    setShowVoucherModal(false);
+    alert(`Đã lập thành công chứng từ ${generatedNo}!`);
+  };
 
   // Derive ledger lines (Cash or Bank)
   const getLedgerLines = () => {
@@ -293,13 +417,58 @@ export default function QuyTienMat() {
 
       {/* Ledger Table Panel */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-rose-100 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-800 text-lg flex items-center gap-2">
-            Nhật ký {selectedAcc === '111' ? 'Tiền Mặt Việt Nam (VND)' : 'Tiền Gửi Ngân Hàng'}
-          </h3>
-          <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-mono">
-            {currentLines.length} dòng phát sinh
-          </span>
+        <div className="p-6 border-b border-rose-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-slate-800 text-lg flex items-center gap-2" id="ledger-title-text">
+              Nhật ký {selectedAcc === '111' ? 'Tiền Mặt Việt Nam (VND)' : 'Tiền Gửi Ngân Hàng (TGNH)'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">Hiển thị các giao dịch phát sinh. Các số liệu ngày hiển thị dạng dd/mm/yyyy.</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedAcc === '111' ? (
+              <>
+                <button
+                  onClick={() => openVoucherModal('PT')}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer active:scale-95 animate-fade-in"
+                  id="btn-lap-phieu-thu"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Lập Phiếu Thu
+                </button>
+                <button
+                  onClick={() => openVoucherModal('PC')}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer active:scale-95 animate-fade-in"
+                  id="btn-lap-phieu-chi"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Lập Phiếu Chi
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => openVoucherModal('BC')}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer active:scale-95 animate-fade-in"
+                  id="btn-lap-bao-co"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Lập Báo Có
+                </button>
+                <button
+                  onClick={() => openVoucherModal('BN')}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:shadow-md cursor-pointer active:scale-95 animate-fade-in"
+                  id="btn-lap-bao-no"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Lập Báo Nợ
+                </button>
+              </>
+            )}
+            <span className="px-2.5 py-1 text-slate-600 bg-slate-100 rounded-lg text-xs font-mono font-bold">
+              {currentLines.length} dòng
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -326,7 +495,7 @@ export default function QuyTienMat() {
               ) : (
                 currentLines.map((line, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/50 transition">
-                    <td className="py-4 px-6 font-mono text-xs">{line.date}</td>
+                    <td className="py-4 px-6 font-mono text-xs text-slate-600">{formatDateDMY(line.date)}</td>
                     <td className="py-4 px-4">
                       <span className="font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-md text-xs">{line.docNo}</span>
                     </td>
@@ -373,6 +542,150 @@ export default function QuyTienMat() {
         </div>
       </div>
 
+      {/* INPUT VOUCHER MODAL OVERLAY */}
+      {showVoucherModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 transition-all overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-lg w-full overflow-hidden" id="add-voucher-modal">
+            {/* Header */}
+            <div className={`p-4 border-b text-white flex items-center justify-between ${
+              voucherType === 'PT' ? 'bg-emerald-600' :
+              voucherType === 'PC' ? 'bg-rose-600' :
+              voucherType === 'BC' ? 'bg-blue-600' : 'bg-indigo-600'
+            }`}>
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-5 h-5 animate-pulse" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wide">
+                  {voucherType === 'PT' ? 'Lập Phiếu Thu Tiền Mặt' :
+                   voucherType === 'PC' ? 'Lập Phiếu Chi Tiền Mặt' :
+                   voucherType === 'BC' ? 'Hạch toán Báo Có Ngân Hàng' : 'Hạch toán Báo Nợ Ngân Hàng'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowVoucherModal(false)}
+                className="text-white/90 hover:text-white hover:bg-white/10 p-1 rounded-lg transition"
+                id="close-add-voucher"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleAddVoucherSubmit} className="p-6 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                  Số Chứng Từ (Số Phiếu Tự Sinh):
+                </label>
+                <input
+                  type="text"
+                  readOnly
+                  disabled
+                  value={`${generateVoucherNo(voucherType)} (Tự sinh khi lưu)`}
+                  className="w-full px-3 py-2 text-xs font-mono font-bold bg-slate-100 text-slate-600 rounded-lg border border-slate-200"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    Ngày Hạch Toán:
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formDate}
+                    onChange={(e) => setFormDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-600 bg-slate-50 hover:bg-white focus:bg-white font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                    Tài khoản đối ứng:
+                  </label>
+                  <select
+                    value={formReciprocalAcc}
+                    onChange={(e) => setFormReciprocalAcc(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-600 bg-slate-50 hover:bg-white focus:bg-white font-bold"
+                  >
+                    {accounts.filter((acc: any) => acc.code !== '111' && acc.code !== '112').map((acc: any) => (
+                      <option key={acc.code} value={acc.code}>
+                        {acc.code} - {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                  Giá trị Giao dịch (VND):
+                </label>
+                <input
+                  type="number"
+                  required
+                  min={1000}
+                  value={formAmount}
+                  onChange={(e) => setFormAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full px-3 py-2 text-sm font-semibold font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-600 bg-slate-50 hover:bg-white focus:bg-white text-slate-800"
+                  placeholder="Nhập số tiền phát sinh..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                  Đối tác giao dịch:
+                </label>
+                <select
+                  value={formPartnerCode}
+                  onChange={(e) => setFormPartnerCode(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-600 bg-slate-50 hover:bg-white focus:bg-white font-medium"
+                >
+                  {partners.map((p: any) => (
+                    <option key={p.code} value={p.code}>
+                      [{p.code}] - {p.name}
+                    </option>
+                  ))}
+                  <option value="KHAC">Đối tác Khác / Lẻ thường trú</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+                  Diễn giải nội dung giao dịch:
+                </label>
+                <textarea
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-600 bg-slate-50 hover:bg-white focus:bg-white text-slate-700 h-16 resize-none font-medium"
+                  placeholder="Nhập nội dung cho chứng từ..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowVoucherModal(false)}
+                  className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition text-xs font-bold cursor-pointer"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="submit"
+                  className={`px-5 py-2 text-white rounded-lg transition text-xs font-black shadow-xs cursor-pointer flex items-center gap-1 hover:shadow-md ${
+                    voucherType === 'PT' ? 'bg-emerald-600 hover:bg-emerald-700' :
+                    voucherType === 'PC' ? 'bg-rose-600 hover:bg-rose-700' :
+                    voucherType === 'BC' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                  id="btn-save-new-voucher"
+                >
+                  Lưu & Duyệt Chứng Từ
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* PRINT DIALOG PREVIEW MODAL */}
       {printVoucher && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 transition-all overflow-y-auto">
@@ -402,9 +715,15 @@ export default function QuyTienMat() {
             <div className="p-8 pb-12 font-serif text-slate-800 bg-white" id="voucher-print-area">
               <div className="flex justify-between items-start border-b border-dotted pb-4">
                 <div>
-                  <h4 className="font-bold text-sm text-slate-900 font-sans tracking-wide uppercase">CÔNG TY TNHH BÌNH PHAN PHÁT</h4>
-                  <p className="text-xs font-sans text-slate-500 mt-0.5">Địa chỉ: Thị trấn Diên Sanh, Hải Lăng, Quảng Trị</p>
-                  <p className="text-xs font-sans text-slate-500">Mã số thuế: 3200112233</p>
+                  <h4 className="font-bold text-sm text-slate-900 font-sans uppercase">
+                    {companyInfo?.name || 'CÔNG TY TNHH BÌNH PHAN PHÁT'}
+                  </h4>
+                  <p className="text-xs font-sans text-slate-500 mt-0.5">
+                    Địa chỉ: {companyInfo?.address || 'Thị trấn Diên Sanh, Hải Lăng, Quảng Trị'}
+                  </p>
+                  <p className="text-xs font-sans text-slate-500">
+                    Mã số thuế: {companyInfo?.taxCode || '3200112233'}
+                  </p>
                 </div>
                 <div className="text-right">
                   <h5 className="font-bold text-xs uppercase font-sans">Mẫu số 01-TT</h5>
@@ -416,7 +735,7 @@ export default function QuyTienMat() {
               {/* Title Section */}
               <div className="text-center my-6 space-y-1">
                 <h3 className="text-2xl font-bold text-slate-900 tracking-wide uppercase">{printVoucher.title}</h3>
-                <p className="text-xs text-slate-500 italic">Ngày lập chứng từ: {printVoucher.date}</p>
+                <p className="text-xs text-slate-500 italic">Ngày lập chứng từ: {formatDateDMY(printVoucher.date)}</p>
                 <p className="text-xs font-mono font-bold text-slate-700">Quyển số: Q02/2026 | Số chứng từ: {printVoucher.voucherNo}</p>
               </div>
 

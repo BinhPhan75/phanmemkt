@@ -411,7 +411,7 @@ export default function NhapLieu() {
                   className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
                   id="quick-add-partner-hoadon-btn"
                 >
-                  + Đăng ký mới
+                  + Thêm mới khách hàng
                 </button>
               </div>
               <select

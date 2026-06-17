@@ -6,12 +6,73 @@
 import React, { useState } from 'react';
 import { useAccounting } from '../utils/accountingState';
 import { InventoryItem, Partner, AccountingTransaction } from '../types';
-import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, ListCollapse } from 'lucide-react';
+import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, ListCollapse, Users, X } from 'lucide-react';
 
 export default function NhapLieu() {
-  const { partners, items, accounts, addTransaction } = useAccounting();
+  const { partners, items, accounts, addTransaction, addPartner } = useAccounting();
 
   const [activeEntryType, setActiveEntryType] = useState<'HOADON' | 'PHIEUKT'>('HOADON');
+
+  // Quick add partner states
+  const [showQuickAddPartner, setShowQuickAddPartner] = useState(false);
+  const [newPartnerCode, setNewPartnerCode] = useState('');
+  const [newPartnerName, setNewPartnerName] = useState('');
+  const [newPartnerTaxCode, setNewPartnerTaxCode] = useState('');
+  const [newPartnerAddress, setNewPartnerAddress] = useState('');
+  const [newPartnerType, setNewPartnerType] = useState<'CUSTOMER' | 'VENDOR' | 'BOTH'>('CUSTOMER');
+  const [newPartnerOpeningDebit, setNewPartnerOpeningDebit] = useState(0);
+  const [newPartnerOpeningCredit, setNewPartnerOpeningCredit] = useState(0);
+  const [quickAddError, setQuickAddError] = useState('');
+
+  const handleQuickAddPartnerSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPartnerCode.trim()) {
+      setQuickAddError('Vui lòng nhập mã đối tác!');
+      return;
+    }
+    if (!newPartnerName.trim()) {
+      setQuickAddError('Vui lòng nhập tên đối tác!');
+      return;
+    }
+    
+    // Check duplication
+    const duplicated = partners.some(p => p.code.toLowerCase() === newPartnerCode.trim().toLowerCase());
+    if (duplicated) {
+      setQuickAddError(`Mã đối tác "${newPartnerCode.trim()}" đã được đăng ký hoặc tồn tại!`);
+      return;
+    }
+
+    const partnerPayload = {
+      id: newPartnerCode.trim().toUpperCase(),
+      code: newPartnerCode.trim().toUpperCase(),
+      name: newPartnerName.trim(),
+      taxCode: newPartnerTaxCode.trim() || undefined,
+      address: newPartnerAddress.trim() || undefined,
+      type: newPartnerType,
+      openingDebit: Number(newPartnerOpeningDebit) || 0,
+      openingCredit: Number(newPartnerOpeningCredit) || 0
+    };
+
+    addPartner(partnerPayload);
+
+    // Auto assign newly created partner code back to active transaction entry select dropdown
+    if (activeEntryType === 'HOADON') {
+      setMaKH(partnerPayload.code);
+    } else {
+      setMaKH_CT(partnerPayload.code);
+    }
+
+    // Clear inputs and close
+    setNewPartnerCode('');
+    setNewPartnerName('');
+    setNewPartnerTaxCode('');
+    setNewPartnerAddress('');
+    setNewPartnerType('CUSTOMER');
+    setNewPartnerOpeningDebit(0);
+    setNewPartnerOpeningCredit(0);
+    setQuickAddError('');
+    setShowQuickAddPartner(false);
+  };
 
   // ==========================================
   // Form state for: DATA ENTRY - INVOICES (HOADON)
@@ -336,19 +397,49 @@ export default function NhapLieu() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Đối tác giao dịch</label>
+              <div className="flex justify-between items-center text-xs font-bold text-slate-500 uppercase">
+                <span>Đối tác giao dịch</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const prefix = loaiHD === 'BR' ? 'KH' : 'NCC';
+                    const randomSuffix = Math.floor(100 + Math.random() * 900);
+                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
+                    setNewPartnerType(loaiHD === 'BR' ? 'CUSTOMER' : 'VENDOR');
+                    setShowQuickAddPartner(true);
+                  }}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                  id="quick-add-partner-hoadon-btn"
+                >
+                  + Đăng ký mới
+                </button>
+              </div>
               <select
                 required
                 value={maKH}
-                onChange={(e) => setMaKH(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === '__add_new__') {
+                    const prefix = loaiHD === 'BR' ? 'KH' : 'NCC';
+                    const randomSuffix = Math.floor(100 + Math.random() * 900);
+                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
+                    setNewPartnerType(loaiHD === 'BR' ? 'CUSTOMER' : 'VENDOR');
+                    setShowQuickAddPartner(true);
+                  } else {
+                    setMaKH(e.target.value);
+                  }
+                }}
                 className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
               >
-                <option value="">-- Chọn khách hàng / NCC --</option>
-                {partners.map(p => (
-                  <option key={p.code} value={p.code}>
-                    {p.code} - {p.name}
-                  </option>
-                ))}
+                <option value="">-- Chọn đối tác --</option>
+                <option value="__add_new__" className="text-indigo-600 font-bold font-sans">+ Đăng ký đối tác mới...</option>
+                {partners.map(p => {
+                  const typeLabel = p.type === 'CUSTOMER' ? 'KH' : p.type === 'VENDOR' ? 'NCC' : 'KH/NCC';
+                  return (
+                    <option key={p.code} value={p.code}>
+                      [{typeLabel}] {p.code} - {p.name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
@@ -564,18 +655,46 @@ export default function NhapLieu() {
               />
             </div>
             <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase">Đối tác liên quan (Không bắt buộc)</label>
+              <div className="flex justify-between items-center text-xs font-bold text-slate-500 uppercase">
+                <span>Đối tác liên quan (Không bắt buộc)</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const randomSuffix = Math.floor(100 + Math.random() * 900);
+                    setNewPartnerCode(`KH-${randomSuffix}`);
+                    setNewPartnerType('BOTH');
+                    setShowQuickAddPartner(true);
+                  }}
+                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
+                  id="quick-add-partner-pkt-btn"
+                >
+                  + Đăng ký mới
+                </button>
+              </div>
               <select
                 value={maKH_CT}
-                onChange={(e) => setMaKH_CT(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === '__add_new__') {
+                    const randomSuffix = Math.floor(100 + Math.random() * 900);
+                    setNewPartnerCode(`KH-${randomSuffix}`);
+                    setNewPartnerType('BOTH');
+                    setShowQuickAddPartner(true);
+                  } else {
+                    setMaKH_CT(e.target.value);
+                  }
+                }}
                 className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
               >
                 <option value="">-- Không hạch công nợ đối tác --</option>
-                {partners.map(p => (
-                  <option key={p.code} value={p.code}>
-                    {p.code} - {p.name}
-                  </option>
-                ))}
+                <option value="__add_new__" className="text-indigo-600 font-bold font-sans">+ Đăng ký đối tác mới...</option>
+                {partners.map(p => {
+                  const typeLabel = p.type === 'CUSTOMER' ? 'KH' : p.type === 'VENDOR' ? 'NCC' : 'KH/NCC';
+                  return (
+                    <option key={p.code} value={p.code}>
+                      [{typeLabel}] {p.code} - {p.name}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
@@ -724,6 +843,159 @@ export default function NhapLieu() {
             </button>
           </div>
         </form>
+      )}
+
+      {/* QUICK ADD PARTNER MODAL DIALOG */}
+      {showQuickAddPartner && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">Đăng ký Đối tác giao dịch mới</h3>
+                  <p className="text-[10px] text-slate-400 font-medium">Bổ sung nhanh thông tin khách hàng, nhà cung cấp</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQuickAddPartner(false);
+                  setQuickAddError('');
+                }}
+                className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-650 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleQuickAddPartnerSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+              {quickAddError && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl text-xs text-red-650 flex items-center gap-1.5 font-medium animate-pulse">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{quickAddError}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Mã đối tác <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="VD: KH-STC"
+                    value={newPartnerCode}
+                    onChange={(e) => {
+                      setNewPartnerCode(e.target.value.toUpperCase());
+                      setQuickAddError('');
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-500 font-bold"
+                  />
+                  <span className="text-[9px] text-slate-400 block font-normal">Duy nhất, không dấu cách</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Phân loại đối tác</label>
+                  <select
+                    value={newPartnerType}
+                    onChange={(e) => setNewPartnerType(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-medium"
+                  >
+                    <option value="CUSTOMER">Khách hàng (131)</option>
+                    <option value="VENDOR">Nhà cung cấp (331)</option>
+                    <option value="BOTH">Cả hai (Khách + NCC)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Tên đối tác / Doanh nghiệp <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Công ty TNHH Giải pháp Phần mềm BK"
+                  value={newPartnerName}
+                  onChange={(e) => {
+                    setNewPartnerName(e.target.value);
+                    setQuickAddError('');
+                  }}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Mã số thuế</label>
+                <input
+                  type="text"
+                  placeholder="0102030405-001"
+                  value={newPartnerTaxCode}
+                  onChange={(e) => setNewPartnerTaxCode(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Địa chỉ trụ sở</label>
+                <input
+                  type="text"
+                  placeholder="Số 45, Đường Giải Phóng, Hai Bà Trưng, Hà Nội"
+                  value={newPartnerAddress}
+                  onChange={(e) => setNewPartnerAddress(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="border-t border-slate-100 pt-3 mt-1 grid grid-cols-2 gap-3 bg-slate-50 p-2.5 rounded-xl">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase block">Số dư NỢ đầu kỳ (vnđ)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newPartnerOpeningDebit}
+                    onChange={(e) => setNewPartnerOpeningDebit(Math.abs(Number(e.target.value)))}
+                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-[11px] text-right font-mono text-emerald-800"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase block">Số dư CÓ đầu kỳ (vnđ)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newPartnerOpeningCredit}
+                    onChange={(e) => setNewPartnerOpeningCredit(Math.abs(Number(e.target.value)))}
+                    className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-[11px] text-right font-mono text-rose-800"
+                  />
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-2.5 pt-4 border-t border-slate-100 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowQuickAddPartner(false);
+                    setQuickAddError('');
+                  }}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-lg text-xs transition cursor-pointer"
+                >
+                  Bỏ qua
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer flex items-center gap-1 shadow-sm"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Đăng ký & Chọn
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

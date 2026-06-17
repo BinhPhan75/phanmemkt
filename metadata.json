@@ -1,0 +1,6 @@
+{
+  "name": "Phần mềm Kế toán Doanh nghiệp TT133",
+  "description": "Hệ thống quản lý kế toán cho doanh nghiệp vừa và nhỏ theo Thông tư 133 Bộ Tài chính, đầy đủ 7 phân hệ gồm kế toán quỹ, công nợ, kho vật tư, thuế, báo cáo sổ sách, báo cáo tài chính và mô đun nhập liệu hóa đơn thông minh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

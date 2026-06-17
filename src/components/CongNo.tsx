@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { useAccounting } from '../utils/accountingState';
 import { Partner } from '../types';
-import { Users, FileMinus, FilePlus, ChevronRight, BookOpen, AlertCircle, Plus, Search, Building } from 'lucide-react';
+import { Users, FileMinus, FilePlus, ChevronRight, BookOpen, AlertCircle, Plus, Search, Building, Printer } from 'lucide-react';
 
 export default function CongNo() {
   const { partners, transactions, addPartner } = useAccounting();
@@ -14,6 +14,10 @@ export default function CongNo() {
   const [selectedPartnerCode, setSelectedPartnerCode] = useState<string>('');
   const [selectedSubTab, setSelectedSubTab] = useState<'TONG_HOP' | 'CHI_TIET'>('TONG_HOP');
   const [partnerSearchQuery, setPartnerSearchQuery] = useState('');
+  
+  // Date filter range states matching standard TT133 period
+  const [startDate, setStartDate] = useState('2026-06-01');
+  const [endDate, setEndDate] = useState('2026-06-30');
   
   // Modal states for creating a new partner
   const [showAddPartnerModal, setShowAddPartnerModal] = useState(false);
@@ -50,15 +54,14 @@ export default function CongNo() {
     const partner = partners.find(p => p.code === partnerCode);
     if (!partner) return { rows: [], initialDebit: 0, initialCredit: 0, finalBalDebit: 0, finalBalCredit: 0, totalDebit: 0, totalCredit: 0 };
 
-    // Determine initial balances
-    const initialDebit = (selectedAcc === '131' ? partner.openingDebit : 0) || 0;
-    const initialCredit = (selectedAcc === '331' ? partner.openingCredit : 0) || 0;
+    // Determine initial balances (historical values up to but excluding startDate)
+    let initialDebit = (selectedAcc === '131' ? partner.openingDebit : 0) || 0;
+    let initialCredit = (selectedAcc === '331' ? partner.openingCredit : 0) || 0;
 
-    let runningBal = initialDebit - initialCredit;
-
+    // Filter historical transactions before the startDate
     transactions.forEach(tx => {
       const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
-      const dbDocNo = tx.type === 'HOADON' ? tx.soHD : tx.soCT;
+      if (dbDate >= startDate) return;
 
       if (tx.type === 'HOADON') {
         if (tx.maKH !== partnerCode) return;
@@ -66,6 +69,41 @@ export default function CongNo() {
         const totalBase = tx.items.reduce((sum, item) => sum + item.thanhTien, 0);
         const totalTax = tx.items.reduce((sum, item) => sum + item.tienThue, 0);
         const totalValue = totalBase + totalTax;
+
+        if (tx.loaiHD === 'BR') {
+          if (tx.tkNo === selectedAcc) {
+            initialDebit += totalValue;
+          }
+        } else {
+          if (tx.tkCo === selectedAcc) {
+            initialCredit += totalValue;
+          }
+        }
+      } else {
+        if (tx.maKH !== partnerCode) return;
+        tx.lines.forEach(line => {
+          if (line.soTK.startsWith(selectedAcc)) {
+            initialDebit += line.psNo;
+            initialCredit += line.psCo;
+          }
+        });
+      }
+    });
+
+    let runningBal = initialDebit - initialCredit;
+
+    // Process transactions in active date range [startDate, endDate]
+    transactions.forEach(tx => {
+      const dbDate = tx.type === 'HOADON' ? tx.ngayHD : tx.ngayCT;
+      const dbDocNo = tx.type === 'HOADON' ? tx.soHD : tx.soCT;
+
+      if (dbDate < startDate || dbDate > endDate) return;
+
+      if (tx.type === 'HOADON') {
+        if (tx.maKH !== partnerCode) return;
+
+        const totalBase = tx.items.reduce((sum, item) => sum + item.thanhTien, 0);
+        const totalTax = tx.items.reduce((sum, item) => sum + item.tienThue, 0);
 
         if (tx.loaiHD === 'BR') {
           // Sales: Debits 131, Credits 511 + 33311
@@ -279,6 +317,38 @@ export default function CongNo() {
             Nợ Phải Trả Nhà Cung Cấp (TK 331)
           </button>
         </div>
+      </div>
+
+      {/* Date Filters and Printing controls for Debt Reports */}
+      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-slate-500 mb-1">Kỳ hạch toán từ ngày</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-3 py-2 border border-slate-200 rounded-lg text-xs text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800 font-bold"
+            />
+          </div>
+          <div className="flex flex-col">
+            <label className="text-xs font-semibold text-slate-500 mb-1">Đến ngày</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-3 py-2 border border-slate-200 rounded-lg text-xs text-slate-755 bg-slate-50 focus:outline-none focus:border-slate-800 font-bold"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={() => window.print()}
+          className="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold hover:bg-slate-900 transition flex items-center gap-1.5 cursor-pointer shadow-xs self-end md:self-center"
+        >
+          <Printer className="w-4 h-4" />
+          In báo cáo công nợ (PDF)
+        </button>
       </div>
 
       {/* Sub-tab Switcher Bar */}

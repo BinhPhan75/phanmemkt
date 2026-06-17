@@ -743,54 +743,6 @@ export default function InAnSoSach() {
             </div>
           </div>
 
-          <div className="space-y-1">
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1">II. Sổ sách & báo cáo công nợ</span>
-            <div className="flex bg-white/60 p-1 rounded-xl gap-1 flex-wrap">
-              <button
-                onClick={() => {
-                  setSelectedBook('SCT_131');
-                  setSelectedPartnerCode('131-BINHMINH');
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedBook === 'SCT_131' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-                id="switch-book-sct131"
-              >
-                Sổ CT Phải Thu (131)
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedBook('SCT_331');
-                  const vend = partners.find(p => p.type === 'VENDOR' || p.type === 'BOTH');
-                  setSelectedPartnerCode(vend?.code || '331-HOALAM');
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedBook === 'SCT_331' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-                id="switch-book-sct331"
-              >
-                Sổ CT Phải Trả (331)
-              </button>
-              <button
-                onClick={() => setSelectedBook('TH_131')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedBook === 'TH_131' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-                id="switch-book-th131"
-              >
-                T.Hợp Phải Thu (131)
-              </button>
-              <button
-                onClick={() => setSelectedBook('TH_331')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedBook === 'TH_331' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-                id="switch-book-th331"
-              >
-                T.Hợp Phải Trả (331)
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 

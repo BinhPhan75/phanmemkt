@@ -30,7 +30,9 @@ import {
   Copy, 
   Settings, 
   X,
-  FileSpreadsheet
+  FileSpreadsheet,
+  ChevronDown,
+  Menu
 } from 'lucide-react';
 
 export default function App() {
@@ -40,6 +42,7 @@ export default function App() {
   } = useAccounting();
 
   const [activeTab, setActiveTab] = useState<'QUY' | 'CONG_NO' | 'KHO' | 'THUE' | 'SO_SACH' | 'BCTC' | 'NHAP_LIEU' | 'HE_THONG'>('NHAP_LIEU');
+  const [showMenuDropdown, setShowMenuDropdown] = useState(false);
   
   // Supabase Settings overlay drawer state
   const [showSettings, setShowSettings] = useState(false);
@@ -147,97 +150,181 @@ export default function App() {
         </div>
       </header>
 
-      {/* Primary Tab Bar Row */}
-      <div className="bg-slate-900 text-slate-400 px-6 py-1.5 shadow-sm">
-        <div className="flex overflow-x-auto gap-1 scrollbar-none items-center">
+      {/* Primary Tab Bar Row - Now structured as a beautiful, clean dropdown menu & active tab info */}
+      <div className="bg-slate-900 text-slate-200 px-6 py-2 shadow-md relative z-40">
+        <div className="max-w-7xl mx-auto w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           
-          <button
-            onClick={() => setActiveTab('NHAP_LIEU')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'NHAP_LIEU' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-nhaplieu"
-          >
-            <PlusCircle className="w-4 h-4" />
-            1. Nhập liệu Chứng từ
-          </button>
+          {/* Active Tab Showcase and Toggle Button */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mr-1">
+              Phân hệ đang mở:
+            </span>
+            <div className="flex items-center gap-2 bg-slate-800/80 px-3.5 py-1.5 rounded-xl border border-slate-700/50 shadow-inner">
+              {(() => {
+                const IconComp = activeTab === 'NHAP_LIEU' ? PlusCircle :
+                                 activeTab === 'QUY' ? Wallet :
+                                 activeTab === 'CONG_NO' ? Users :
+                                 activeTab === 'KHO' ? Box :
+                                 activeTab === 'THUE' ? Percent :
+                                 activeTab === 'SO_SACH' ? BookOpen :
+                                 activeTab === 'BCTC' ? TrendingUp : Settings;
+                return <IconComp className="w-4 h-4 text-indigo-400" />;
+              })()}
+              <span className="text-xs font-black tracking-wide text-white font-sans">
+                {activeTab === 'NHAP_LIEU' && '1. Nhập liệu Chứng từ'}
+                {activeTab === 'QUY' && '2. Kế toán quỹ & Ngân hàng'}
+                {activeTab === 'CONG_NO' && '3. Kế toán công nợ'}
+                {activeTab === 'KHO' && '4. Kế toán kho & Vật tư'}
+                {activeTab === 'THUE' && '5. Kế toán thuế VAT'}
+                {activeTab === 'SO_SACH' && '6. Sổ sách & In ấn'}
+                {activeTab === 'BCTC' && '7. Báo cáo tài chính'}
+                {activeTab === 'HE_THONG' && '8. Hệ thống & Phân quyền'}
+              </span>
+            </div>
+          </div>
 
-          <button
-            onClick={() => setActiveTab('QUY')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'QUY' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-quytienmat"
-          >
-            <Wallet className="w-4 h-4" />
-            2. Kế toán quỹ & Ngân hàng
-          </button>
+          {/* Interactive Dropdown Button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowMenuDropdown(!showMenuDropdown)}
+              className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold uppercase tracking-wider flex items-center justify-between sm:justify-start gap-2.5 transition active:scale-95 shadow-md cursor-pointer"
+              id="dropdown-menu-trigger"
+            >
+              <Menu className="w-4 h-4" />
+              <span>Chuyển Phân Hệ Hạch Toán</span>
+              <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${showMenuDropdown ? 'rotate-180' : ''}`} />
+            </button>
 
-          <button
-            onClick={() => setActiveTab('CONG_NO')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'CONG_NO' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-congno"
-          >
-            <Users className="w-4 h-4" />
-            3. Kế toán công nợ
-          </button>
+            {/* Dropdown Content Panel */}
+            {showMenuDropdown && (
+              <>
+                {/* Backdrop overlay to close when click outside */}
+                <div 
+                  className="fixed inset-0 z-40 bg-transparent" 
+                  onClick={() => setShowMenuDropdown(false)} 
+                />
+                
+                {/* Float Card */}
+                <div 
+                  className="absolute right-0 top-full mt-2 w-full sm:w-[480px] bg-white rounded-2xl shadow-2xl border border-slate-150 z-50 p-3 flex flex-col divide-y divide-slate-100 animate-slide-down"
+                  id="dropdown-menu-panel"
+                >
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3 pb-2 block">
+                    Danh Sách Phân Hệ - Chọn để truy xuất:
+                  </span>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2">
+                    {[
+                      { 
+                        id: 'NHAP_LIEU', 
+                        num: '1', 
+                        label: 'Nhập liệu Chứng từ', 
+                        desc: 'Lập hóa đơn, hạch toán định khoản kép', 
+                        icon: PlusCircle, 
+                        bg: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+                        activeBg: 'bg-emerald-600 text-white border-emerald-600'
+                      },
+                      { 
+                        id: 'QUY', 
+                        num: '2', 
+                        label: 'Kế toán quỹ & Ngân hàng', 
+                        desc: 'Thu/Chi tiền mặt, báo nợ, báo có tiền gửi', 
+                        icon: Wallet, 
+                        bg: 'bg-amber-50 text-amber-700 border-amber-100',
+                        activeBg: 'bg-amber-600 text-white border-amber-600'
+                      },
+                      { 
+                        id: 'CONG_NO', 
+                        num: '3', 
+                        label: 'Kế toán công nợ', 
+                        desc: 'Theo dõi, đối chiếu nợ khách hàng, đối tác', 
+                        icon: Users, 
+                        bg: 'bg-blue-50 text-blue-700 border-blue-100',
+                        activeBg: 'bg-blue-600 text-white border-blue-600'
+                      },
+                      { 
+                        id: 'KHO', 
+                        num: '4', 
+                        label: 'Kế toán kho & Vật tư', 
+                        desc: 'Báo cáo tồn kho, luân chuyển vật tư kho bãi', 
+                        icon: Box, 
+                        bg: 'bg-rose-50 text-rose-700 border-rose-100',
+                        activeBg: 'bg-rose-600 text-white border-rose-600'
+                      },
+                      { 
+                        id: 'THUE', 
+                        num: '5', 
+                        label: 'Kế toán thuế VAT', 
+                        desc: 'Hóa đơn suất, bảng kê VAT mua bán, tờ khai', 
+                        icon: Percent, 
+                        bg: 'bg-purple-50 text-purple-700 border-purple-100',
+                        activeBg: 'bg-purple-600 text-white border-purple-600'
+                      },
+                      { 
+                        id: 'SO_SACH', 
+                        num: '6', 
+                        label: 'Sổ sách & In ấn', 
+                        desc: 'Nhật ký chung, sổ cái TK, sổ quỹ chi tiết', 
+                        icon: BookOpen, 
+                        bg: 'bg-teal-50 text-teal-700 border-teal-100',
+                        activeBg: 'bg-teal-600 text-white border-teal-600'
+                      },
+                      { 
+                        id: 'BCTC', 
+                        num: '7', 
+                        label: 'Báo cáo tài chính', 
+                        desc: 'Cân đối phát sinh, Bảng cân đối kế toán B01a', 
+                        icon: TrendingUp, 
+                        bg: 'bg-cyan-50 text-cyan-700 border-cyan-100',
+                        activeBg: 'bg-cyan-600 text-white border-cyan-600'
+                      },
+                      { 
+                        id: 'HE_THONG', 
+                        num: '8', 
+                        label: 'Hệ thống & Phân quyền', 
+                        desc: 'Khóa niên độ, phân quyền, lưu trữ Supabase API', 
+                        icon: Settings, 
+                        bg: 'bg-slate-100 text-slate-700 border-slate-200',
+                        activeBg: 'bg-slate-800 text-white border-slate-800'
+                      }
+                    ].map((m) => {
+                      const IconComponent = m.icon;
+                      const isActive = activeTab === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          onClick={() => {
+                            setActiveTab(m.id as any);
+                            setShowMenuDropdown(false);
+                          }}
+                          className={`p-2.5 rounded-xl border text-left transition duration-150 flex gap-2.5 items-start cursor-pointer hover:shadow-xs group h-[68px] ${
+                            isActive 
+                              ? m.activeBg
+                              : 'bg-white border-slate-150 hover:bg-slate-50/70 hover:border-slate-300'
+                          }`}
+                        >
+                          <span className={`p-1.5 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
+                            isActive ? 'bg-white/20 border-white/10 text-white' : m.bg
+                          }`}>
+                            <IconComponent className="w-3.5 h-3.5" />
+                          </span>
 
-          <button
-            onClick={() => setActiveTab('KHO')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'KHO' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-khomaterial"
-          >
-            <Box className="w-4 h-4" />
-            4. Kế toán kho & Vật tư
-          </button>
-
-          <button
-            onClick={() => setActiveTab('THUE')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'THUE' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-ketoanthue"
-          >
-            <Percent className="w-4 h-4" />
-            5. Kế toán thuế VAT
-          </button>
-
-          <button
-            onClick={() => setActiveTab('SO_SACH')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'SO_SACH' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-nancungso"
-          >
-            <BookOpen className="w-4 h-4" />
-            6. Sổ sách & In ấn
-          </button>
-
-          <button
-            onClick={() => setActiveTab('BCTC')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'BCTC' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-baocaotaichinh"
-          >
-            <TrendingUp className="w-4 h-4" />
-            7. Báo cáo tài chính
-          </button>
-
-          <button
-            onClick={() => setActiveTab('HE_THONG')}
-            className={`px-4 py-2.5 rounded-lg text-xs font-bold tracking-wide uppercase transition-all duration-150 flex items-center gap-1.5 cursor-pointer shrink-0 ${
-              activeTab === 'HE_THONG' ? 'bg-indigo-600 text-white shadow-xs' : 'hover:text-white hover:bg-slate-800'
-            }`}
-            id="tab-btn-hethong"
-          >
-            <Settings className="w-4 h-4" />
-            8. Hệ thống
-          </button>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11.5px] font-extrabold tracking-tight truncate">
+                              {m.num}. {m.label}
+                            </p>
+                            <p className={`text-[9.5px] leading-tight font-medium mt-0.5 line-clamp-2 ${isActive ? 'text-white/80' : 'text-slate-400 group-hover:text-slate-500'}`}>
+                              {m.desc}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
 
         </div>
       </div>

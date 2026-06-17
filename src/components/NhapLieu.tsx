@@ -3,15 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAccounting } from '../utils/accountingState';
-import { InventoryItem, Partner, AccountingTransaction } from '../types';
-import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, ListCollapse, Users, X } from 'lucide-react';
+import { InventoryItem, Partner, AccountingTransaction, JournalLine } from '../types';
+import { PlusCircle, FileSpreadsheet, Trash2, CheckCircle2, AlertTriangle, Users, X, RefreshCw, Layers } from 'lucide-react';
 
 export default function NhapLieu() {
-  const { partners, items, accounts, addTransaction, addPartner, currentFiscalYear, closedYears } = useAccounting();
+  const { partners, items, accounts, addTransaction, addPartner, currentFiscalYear } = useAccounting();
 
-  const [activeEntryType, setActiveEntryType] = useState<'HOADON' | 'PHIEUKT'>('HOADON');
+  // Mode state: unified on one screen where the user selects the transaction type
+  const [entryMode, setEntryMode] = useState<'KT_GOP' | 'HOA_DON'>('KT_GOP');
 
   // Quick add partner states
   const [showQuickAddPartner, setShowQuickAddPartner] = useState(false);
@@ -35,19 +36,18 @@ export default function NhapLieu() {
       return;
     }
     
-    // Check duplication
     const duplicated = partners.some(p => p.code.toLowerCase() === newPartnerCode.trim().toLowerCase());
     if (duplicated) {
-      setQuickAddError(`Mã đối tác "${newPartnerCode.trim()}" đã được đăng ký hoặc tồn tại!`);
+      setQuickAddError(`Mã đối tác "${newPartnerCode.trim()}" đã tồn tại!`);
       return;
     }
 
-    const partnerPayload = {
+    const partnerPayload: Partner = {
       id: newPartnerCode.trim().toUpperCase(),
       code: newPartnerCode.trim().toUpperCase(),
       name: newPartnerName.trim(),
-      taxCode: newPartnerTaxCode.trim() || undefined,
-      address: newPartnerAddress.trim() || undefined,
+      taxCode: newPartnerTaxCode.trim(),
+      address: newPartnerAddress.trim(),
       type: newPartnerType,
       openingDebit: Number(newPartnerOpeningDebit) || 0,
       openingCredit: Number(newPartnerOpeningCredit) || 0
@@ -55,14 +55,10 @@ export default function NhapLieu() {
 
     addPartner(partnerPayload);
 
-    // Auto assign newly created partner code back to active transaction entry select dropdown
-    if (activeEntryType === 'HOADON') {
-      setMaKH(partnerPayload.code);
-    } else {
-      setMaKH_CT(partnerPayload.code);
-    }
+    // Auto-select in the main form
+    setMaKH(partnerPayload.code);
 
-    // Clear inputs and close
+    // Reset quick add inputs
     setNewPartnerCode('');
     setNewPartnerName('');
     setNewPartnerTaxCode('');
@@ -75,39 +71,134 @@ export default function NhapLieu() {
   };
 
   // ==========================================
-  // Form state for: DATA ENTRY - INVOICES (HOADON)
+  // SHARED HEADER STATES FOR DATA ENTRY
   // ==========================================
-  const [loaiHD, setLoaiHD] = useState<'BR' | 'MV'>('BR');
-  const [soHD, setSoHD] = useState('');
-  const [kyHieuHD, setKyHieuHD] = useState(`BM/${currentFiscalYear.substring(2)}E`);
-  const [ngayHD, setNgayHD] = useState(`${currentFiscalYear}-06-17`);
+  const [soDoc, setSoDoc] = useState(''); // Unified number (soCT / soHD)
+  const [ngayDoc, setNgayDoc] = useState(`${currentFiscalYear}-06-17`);
   const [maKH, setMaKH] = useState('');
-  const [dienGiaiHD, setDienGiaiHD] = useState('');
+  const [dienGiaiChung, setDienGiaiChung] = useState('');
 
-  // ==========================================
-  // Form state for: DATA ENTRY - JOURNAL VOUCHERS (PHIEUKT)
-  // ==========================================
-  const [soCT, setSoCT] = useState('');
-  const [ngayCT, setNgayCT] = useState(`${currentFiscalYear}-06-17`);
-  const [dienGiaiCT, setDienGiaiCT] = useState('');
-  const [maKH_CT, setMaKH_CT] = useState('');
+  // Sereal code for Invoice Mode
+  const [kyHieuHD, setKyHieuHD] = useState(`BM/${currentFiscalYear.substring(2)}E`);
 
-  // Sync date year with current fiscal year
-  React.useEffect(() => {
-    setNgayHD(`${currentFiscalYear}-06-17`);
-    setNgayCT(`${currentFiscalYear}-06-17`);
+  useEffect(() => {
+    setNgayDoc(`${currentFiscalYear}-06-17`);
     setKyHieuHD(`BM/${currentFiscalYear.substring(2)}E`);
   }, [currentFiscalYear]);
-  
-  // Standard account mapping presets
+
+  // ==========================================
+  // MULTI-LINE ACCOUNTING ENTRIES (KT_GOP)
+  // Allows unlimited Debit/Credit rows ("Nhiều Nợ Nhiều Có")
+  // ==========================================
+  const [voucherLines, setVoucherLines] = useState<Array<{
+    soTK: string;
+    loaiTK: 'No' | 'Co';
+    soTien: number;
+    dienGiaiDong: string;
+  }>>([
+    { soTK: '6422', loaiTK: 'No', soTien: 1500000, dienGiaiDong: 'Chi tiền điện phục vụ quản lý văn phòng' },
+    { soTK: '111', loaiTK: 'Co', soTien: 1500000, dienGiaiDong: 'Rút tiền mặt chi trả tiền điện nước k1' }
+  ]);
+
+  const handleAddVoucherLine = (type: 'No' | 'Co') => {
+    // Intelligently guess the opposite amount to help balance the entry
+    const debitsTotal = voucherLines.filter(l => l.loaiTK === 'No').reduce((s, l) => s + l.soTien, 0);
+    const creditsTotal = voucherLines.filter(l => l.loaiTK === 'Co').reduce((s, l) => s + l.soTien, 0);
+    const diff = Math.abs(debitsTotal - creditsTotal);
+
+    setVoucherLines([
+      ...voucherLines,
+      {
+        soTK: type === 'No' ? '6422' : '111',
+        loaiTK: type,
+        soTien: diff > 0 ? diff : 0,
+        dienGiaiDong: dienGiaiChung || ''
+      }
+    ]);
+  };
+
+  const handleRemoveVoucherLine = (index: number) => {
+    if (voucherLines.length <= 2) {
+      alert('Một chứng từ định khoản kép cần tối thiểu phải có 2 dòng (Tài khoản hạch toán)!');
+      return;
+    }
+    setVoucherLines(voucherLines.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateVoucherLine = (index: number, field: string, value: any) => {
+    const updated = [...voucherLines];
+    updated[index] = { ...updated[index], [field]: value };
+    setVoucherLines(updated);
+  };
+
+  // Perform dynamic trial checks for Debits vs Credits (Tổng Nợ must equal Tổng Có)
+  const sumDebits = voucherLines.filter(l => l.loaiTK === 'No').reduce((s, l) => s + l.soTien, 0);
+  const sumCredits = voucherLines.filter(l => l.loaiTK === 'Co').reduce((s, l) => s + l.soTien, 0);
+  const isBalanced = sumDebits === sumCredits && sumDebits > 0;
+
+  const handleVoucherSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!soDoc.trim()) {
+      alert('Vui lòng điền mã số chứng từ!');
+      return;
+    }
+    if (!isBalanced) {
+      alert('Chứng từ đang bị lệch hạch toán! Tổng tiền Ghi Nợ phải bằng Tổng tiền Ghi Có và lớn hơn 0.');
+      return;
+    }
+    if (voucherLines.some(l => !l.soTK)) {
+      alert('Vui lòng điền đầy đủ số tài khoản cho các dòng định khoản!');
+      return;
+    }
+
+    // Map rows into compliant JournalVoucher lines
+    const mappedLines: JournalLine[] = voucherLines.map((l, idx) => {
+      const parentAccObj = accounts.find(a => a.code === l.soTK);
+      return {
+        id: `line-${Date.now()}-${idx}`,
+        loaiTK: l.loaiTK,
+        soTK: l.soTK,
+        tenTK: parentAccObj ? parentAccObj.name : 'Tài khoản hạch toán',
+        psNo: l.loaiTK === 'No' ? l.soTien : 0,
+        psCo: l.loaiTK === 'Co' ? l.soTien : 0,
+        dienGiai: l.dienGiaiDong || dienGiaiChung || 'Nghiệp vụ kế toán tổng hợp'
+      };
+    });
+
+    const newTx: AccountingTransaction = {
+      id: `TX-${Date.now()}`,
+      type: 'PHIEUKT',
+      soCT: soDoc.toUpperCase(),
+      ngayCT: ngayDoc,
+      ngayGS: ngayDoc,
+      dienGiai: dienGiaiChung || 'Định khoản tổng hợp đa tk',
+      maKH: maKH || undefined,
+      lines: mappedLines
+    };
+
+    addTransaction(newTx);
+    alert('Khởi tạo Ghi sổ Chứng từ tổng hợp thành công!');
+    
+    // Clear form inputs
+    setSoDoc('');
+    setDienGiaiChung('');
+    setVoucherLines([
+      { soTK: '6422', loaiTK: 'No', soTien: 0, dienGiaiDong: '' },
+      { soTK: '111', loaiTK: 'Co', soTien: 0, dienGiaiDong: '' }
+    ]);
+  };
+
+
+  // ==========================================
+  // INVOICE-SPECIFIC SETUP (HOA_DON)
+  // ==========================================
+  const [loaiHD, setLoaiHD] = useState<'BR' | 'MV'>('BR');
   const [tkNoHD, setTkNoHD] = useState('131');
   const [tkCoHD, setTkCoHD] = useState('511');
-  
-  // Cost of goods sold presets (for Sales invoice)
   const [tkGiaVonNo, setTkGiaVonNo] = useState('632');
   const [tkGiaVonCo, setTkGiaVonCo] = useState('156');
 
-  // List of items in current Invoice
+  // List of raw materials item rows inside current Invoice
   const [invoiceItems, setInvoiceItems] = useState<Array<{
     maHang: string;
     soLuong: number;
@@ -124,19 +215,16 @@ export default function NhapLieu() {
   };
 
   const handleRemoveInvoiceItemLine = (index: number) => {
-    const updated = invoiceItems.filter((_, i) => i !== index);
-    setInvoiceItems(updated);
+    setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
   };
 
   const handleUpdateInvoiceItem = (index: number, field: string, value: any) => {
     const nextLine = { ...invoiceItems[index], [field]: value };
     
-    // Auto calculate aggregates
     if (field === 'maHang') {
       const selectedItem = items.find(i => i.code === value);
       if (selectedItem) {
-        // Fallback standard average price if any
-        nextLine.donGia = 25000; 
+        nextLine.donGia = 25000; // standard default average preset
       }
     }
 
@@ -167,12 +255,12 @@ export default function NhapLieu() {
 
   const handleInvoiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!soHD) {
-      alert('Vui lòng nhập số hóa đơn!');
+    if (!soDoc.trim()) {
+      alert('Vui lòng nhập Số hóa đơn!');
       return;
     }
     if (!maKH) {
-      alert('Vui lòng chọn đối tác!');
+      alert('Vui lòng chọn Đối tác cho hóa đơn này!');
       return;
     }
     if (invoiceItems.some(i => !i.maHang || i.soLuong <= 0)) {
@@ -180,541 +268,219 @@ export default function NhapLieu() {
       return;
     }
 
-    const newTx: AccountingTransaction = {
-      id: `TX-${Date.now()}`,
-      type: 'HOADON',
-      loaiHD,
-      soHD,
-      kyHieuHD,
-      ngayHD,
-      maKH,
-      dienGiai: dienGiaiHD || (loaiHD === 'BR' ? `Xuất hóa đơn bán lẻ bán hàng - ${soHD}` : `Nhận hóa đơn vật tư mua vào - ${soHD}`),
-      tkNo: tkNoHD,
-      tkCo: tkCoHD,
-      tkGiaVonNo: loaiHD === 'BR' ? tkGiaVonNo : undefined,
-      tkGiaVonCo: loaiHD === 'BR' ? tkGiaVonCo : undefined,
-      items: invoiceItems
-    };
-
-    addTransaction(newTx);
-    alert('Hạch toán Ghi sổ Hóa đơn mua bán thành công!');
-    
-    // Clear form
-    setSoHD('');
-    setDienGiaiHD('');
-    setInvoiceItems([{ maHang: 'CHI202.300', soLuong: 100, donGia: 25000, thueSuat: 10, thanhTien: 2500000, tienThue: 250000 }]);
-  };
-
-
-  // Sub entries lines
-  const [voucherLines, setVoucherLines] = useState<Array<{
-    soTK: string;
-    loaiTK: 'No' | 'Co';
-    psNo: number;
-    psCo: number;
-    dienGiai?: string;
-  }>>([
-    { soTK: '6422', loaiTK: 'No', psNo: 1500000, psCo: 0, dienGiai: 'Chi điện văn phòng' },
-    { soTK: '111', loaiTK: 'Co', psNo: 0, psCo: 1500000, dienGiai: 'Chi điện bằng tiền mặt tại quỹ' }
-  ]);
-
-  const handleAddVoucherLine = () => {
-    setVoucherLines([...voucherLines, { soTK: '', loaiTK: 'No', psNo: 0, psCo: 0, dienGiai: '' }]);
-  };
-
-  const handleRemoveVoucherLine = (index: number) => {
-    setVoucherLines(voucherLines.filter((_, i) => i !== index));
-  };
-
-  const handleUpdateVoucherLine = (index: number, field: string, value: any) => {
-    const nextLine = { ...voucherLines[index], [field]: value };
-    
-    if (field === 'loaiTK') {
-      if (value === 'No') {
-        nextLine.psCo = 0;
-      } else {
-        nextLine.psNo = 0;
-      }
-    }
-
-    if (field === 'psNo') {
-      nextLine.psCo = 0;
-      nextLine.psNo = Number(value) || 0;
-    }
-    if (field === 'psCo') {
-      nextLine.psNo = 0;
-      nextLine.psCo = Number(value) || 0;
-    }
-
-    const updated = [...voucherLines];
-    updated[index] = nextLine;
-    setVoucherLines(updated);
-  };
-
-  // Check double entry balance validity
-  const sumDebits = voucherLines.filter(l => l.loaiTK === 'No').reduce((s, l) => s + l.psNo, 0);
-  const sumCredits = voucherLines.filter(l => l.loaiTK === 'Co').reduce((s, l) => s + l.psCo, 0);
-  const isBalanced = sumDebits === sumCredits && sumDebits > 0;
-
-  const handleJournalSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!soCT) {
-      alert('Vui lòng điền số chứng từ hạch toán!');
-      return;
-    }
-    if (!isBalanced) {
-      alert('Phát sinh hạch toán kép bị lệch! Tổng Nợ phải bằng Tổng Có và lớn hơn 0.');
-      return;
-    }
-
-    const mappedLines = voucherLines.map((l, lIdx) => {
-      const parentTkObj = accounts.find(a => a.code === l.soTK);
+    // Auto calculate aggregates on items to build real InvoiceItems
+    const processedItems = invoiceItems.map(raw => {
+      const matchingInventory = items.find(i => i.code === raw.maHang);
       return {
-        id: `line-${Date.now()}-${lIdx}`,
-        loaiTK: l.loaiTK,
-        soTK: l.soTK,
-        tenTK: parentTkObj ? parentTkObj.name : 'Tài khoản hạch toán',
-        psNo: l.psNo,
-        psCo: l.psCo,
-        dienGiai: l.dienGiai || dienGiaiCT
+        maHang: raw.maHang,
+        tenHang: matchingInventory ? matchingInventory.name : 'Vật tư chưa phân loại',
+        dvt: matchingInventory ? matchingInventory.unit : 'Cuộn',
+        soLuong: raw.soLuong,
+        donGia: raw.donGia,
+        thanhTien: raw.thanhTien,
+        thueSuat: raw.thueSuat,
+        tienThue: raw.tienThue
       };
     });
 
     const newTx: AccountingTransaction = {
       id: `TX-${Date.now()}`,
-      type: 'PHIEUKT',
-      soCT,
-      ngayCT,
-      ngayGS: ngayCT,
-      dienGiai: dienGiaiCT,
-      maKH: maKH_CT || undefined,
-      lines: mappedLines
+      type: 'HOADON',
+      loaiHD,
+      soHD: soDoc.toUpperCase(),
+      kyHieuHD,
+      ngayHD: ngayDoc,
+      maKH,
+      dienGiai: dienGiaiChung || (loaiHD === 'BR' ? `Xuất hóa đơn bán lẻ bán hàng - ${soDoc}` : `Nhận hóa đơn vật tư mua vào - ${soDoc}`),
+      tkNo: tkNoHD,
+      tkCo: tkCoHD,
+      tkGiaVonNo: loaiHD === 'BR' ? tkGiaVonNo : undefined,
+      tkGiaVonCo: loaiHD === 'BR' ? tkGiaVonCo : undefined,
+      items: processedItems
     };
 
     addTransaction(newTx);
-    alert('Hạch toán Ghi sổ Chứng từ kế toán tổng hợp thành công!');
+    alert('Hạch toán Ghi sổ Hóa đơn vật tư thành công!');
     
-    // Clear Form
-    setSoCT('');
-    setDienGiaiCT('');
-    setVoucherLines([
-      { soTK: '6422', loaiTK: 'No', psNo: 0, psCo: 0, dienGiai: '' },
-      { soTK: '111', loaiTK: 'Co', psNo: 0, psCo: 0, dienGiai: '' }
-    ]);
+    // Clear inputs
+    setSoDoc('');
+    setDienGiaiChung('');
+    setInvoiceItems([{ maHang: 'CHI202.300', soLuong: 100, donGia: 25000, thueSuat: 10, thanhTien: 2500000, tienThue: 250000 }]);
   };
+
 
   return (
     <div className="space-y-6" id="giao-dien-nhap-lieu">
-      {/* Header with Selector tab of entry modes */}
-      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 md:col-span-3">
-        <div className="space-y-1.5 lg:max-w-md">
-          <h2 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
+      {/* Title block with explanation */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
             <span className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-              <PlusCircle className="w-6 h-6" />
+              <Layers className="w-6 h-6" />
             </span>
             Khai báo Hạch Toán / Nhập Liệu
           </h2>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Hỗ trợ tự động hạch toán hóa đơn mua - bán hàng chi tiết và lập phiếu kế toán kép linh hoạt cho các nghiệp vụ phức tạp.
+          <p className="text-xs text-slate-500 leading-normal">
+            Giao diện hạch toán thông tin chứng từ. Hỗ trợ nhập liệu đa tài khoản Nợ/Có đối ứng linh hoạt cho mọi loại nghiệp vụ kế toán doanh nghiệp.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full lg:w-[65%]" id="unified-entry-selector">
+        {/* Entry type controller: embedded directly in the main layout */}
+        <div className="flex bg-slate-100 p-1 rounded-xl w-fit shrink-0 border border-slate-200">
           <button
-            onClick={() => setActiveEntryType('HOADON')}
             type="button"
-            className={`p-4 rounded-xl text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-1.5 ${
-              activeEntryType === 'HOADON'
-                ? 'border-indigo-600 bg-indigo-50/20 shadow-xs text-indigo-900 font-bold'
-                : 'border-slate-200 hover:border-slate-350 bg-slate-50/50 text-slate-700'
+            onClick={() => setEntryMode('KT_GOP')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer ${
+              entryMode === 'KT_GOP'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-800'
             }`}
-            id="select-entry-hoadon-btn"
+            id="switch-entry-general"
           >
-            <div className="flex items-center gap-1.5 font-bold">
-              <FileSpreadsheet className={`w-4 h-4 ${activeEntryType === 'HOADON' ? 'text-indigo-600' : 'text-slate-500'}`} />
-              <span className="text-xs uppercase tracking-wide">A. Hóa Đơn Vạt Tư (MV/BR)</span>
-            </div>
-            <p className="text-[11px] text-slate-500 font-normal leading-normal">
-              Áp dụng hạch toán đơn giản <strong>1 Nợ - 1 Có</strong> đối kháng có kê khai số lượng và đơn giá cụ thể.
-            </p>
+            <PlusCircle className="w-4 h-4" />
+            Bút toán đa Nợ/Có (Tổng hợp)
           </button>
-
           <button
-            onClick={() => setActiveEntryType('PHIEUKT')}
             type="button"
-            className={`p-4 rounded-xl text-left border transition-all duration-200 cursor-pointer flex flex-col justify-between gap-1.5 ${
-              activeEntryType === 'PHIEUKT'
-                ? 'border-indigo-600 bg-indigo-50/20 shadow-xs text-indigo-900 font-bold'
-                : 'border-slate-200 hover:border-slate-350 bg-slate-50/50 text-slate-700'
+            onClick={() => setEntryMode('HOA_DON')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all duration-150 flex items-center gap-1.5 cursor-pointer ${
+              entryMode === 'HOA_DON'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-800'
             }`}
-            id="select-entry-pkt-btn"
+            id="switch-entry-invoice"
           >
-            <div className="flex items-center gap-1.5 font-bold">
-              <PlusCircle className={`w-4 h-4 ${activeEntryType === 'PHIEUKT' ? 'text-indigo-600' : 'text-slate-500'}`} />
-              <span className="text-xs uppercase tracking-wide">B. Phiếu Kế Toán (KT Phức Hợp)</span>
-            </div>
-            <p className="text-[11px] text-slate-500 font-normal leading-normal">
-              Sử dụng khi hạch toán phức tạp phát sinh <strong>nhiều Nợ / nhiều Có</strong> (bút toán phân bổ, thuế đầu ra gộp).
-            </p>
+            <FileSpreadsheet className="w-4 h-4" />
+            Hóa đơn vật tư (Kho & Thuế)
           </button>
         </div>
       </div>
 
-      {activeEntryType === 'HOADON' ? (
-        // ========================
-        // 1. FORM NHẬP HÓA ĐƠN CORES
-        // ========================
-        <form onSubmit={handleInvoiceSubmit} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 md:p-8 space-y-6">
-          <div className="flex justify-between items-center border-b pb-4">
-            <h3 className="font-bold text-slate-800 text-base">Hóa đơn mua vào - bán ra hàng hóa, vật tư</h3>
-            <div className="flex bg-slate-100 p-1 rounded-lg">
-              <button
-                type="button"
-                onClick={() => handleSwitchInvoiceType('BR')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold cursor-pointer ${
-                  loaiHD === 'BR' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-800'
-                }`}
-                id="switch-invoice-br"
-              >
-                Hóa đơn Bán ra (Doanh Thu)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSwitchInvoiceType('MV')}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold cursor-pointer ${
-                  loaiHD === 'MV' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-800'
-                }`}
-                id="switch-invoice-mv"
-              >
-                Hóa đơn Mua vào (Vật tư - Chi phí)
-              </button>
+      {/* COMPREHENSIVE DATA ENTRY FORM CONTAINER */}
+      <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden">
+        {/* Section 1: COMMON DOCUMENT/VOUCHER HEADER INFORMATION */}
+        <div className="p-6 md:p-8 bg-slate-50/50 border-b border-slate-150 space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-dashed border-slate-200 pb-4">
+            <div className="space-y-0.5">
+              <span className="text-[10px] bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md font-bold uppercase tracking-wider">Niên khóa {currentFiscalYear}</span>
+              <h3 className="font-extrabold text-slate-800 text-base">
+                {entryMode === 'KT_GOP' 
+                  ? 'Chứng từ hạch toán gộp kế toán (Nhiều Nợ / Nhiều Có)' 
+                  : 'Ghi nhận Hóa đơn mua-bán vật tư hàng hóa chi tiết'
+                }
+              </h3>
             </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Ký hiệu sê-ri</label>
-              <input
-                type="text"
-                required
-                placeholder="VD: BM/26E"
-                value={kyHieuHD}
-                onChange={(e) => setKyHieuHD(e.target.value.toUpperCase())}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Số hóa đơn</label>
-              <input
-                type="text"
-                required
-                placeholder="VD: 0000045"
-                value={soHD}
-                onChange={(e) => setSoHD(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Ngày hóa đơn</label>
-              <input
-                type="date"
-                required
-                value={ngayHD}
-                onChange={(e) => setNgayHD(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              />
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between items-center text-xs font-bold text-slate-500 uppercase">
-                <span>Đối tác giao dịch</span>
+            {entryMode === 'HOA_DON' && (
+              <div className="flex bg-slate-200 p-1 rounded-lg">
                 <button
                   type="button"
-                  onClick={() => {
-                    const prefix = loaiHD === 'BR' ? 'KH' : 'NCC';
-                    const randomSuffix = Math.floor(100 + Math.random() * 900);
-                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
-                    setNewPartnerType(loaiHD === 'BR' ? 'CUSTOMER' : 'VENDOR');
-                    setShowQuickAddPartner(true);
-                  }}
-                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
-                  id="quick-add-partner-hoadon-btn"
+                  onClick={() => handleSwitchInvoiceType('BR')}
+                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                    loaiHD === 'BR' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                  id="tab-invoice-sales"
                 >
-                  + Thêm mới khách hàng
+                  Bán ra (Doanh Thu)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchInvoiceType('MV')}
+                  className={`px-3 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                    loaiHD === 'MV' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                  id="tab-invoice-purchases"
+                >
+                  Mua vào (Vật tư - Chi phí)
                 </button>
               </div>
-              <select
-                required
-                value={maKH}
-                onChange={(e) => {
-                  if (e.target.value === '__add_new__') {
-                    const prefix = loaiHD === 'BR' ? 'KH' : 'NCC';
-                    const randomSuffix = Math.floor(100 + Math.random() * 900);
-                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
-                    setNewPartnerType(loaiHD === 'BR' ? 'CUSTOMER' : 'VENDOR');
-                    setShowQuickAddPartner(true);
-                  } else {
-                    setMaKH(e.target.value);
-                  }
-                }}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
-              >
-                <option value="">-- Chọn đối tác --</option>
-                <option value="__add_new__" className="text-indigo-600 font-bold font-sans">+ Đăng ký đối tác mới...</option>
-                {partners.map(p => {
-                  const typeLabel = p.type === 'CUSTOMER' ? 'KH' : p.type === 'VENDOR' ? 'NCC' : 'KH/NCC';
-                  return (
-                    <option key={p.code} value={p.code}>
-                      [{typeLabel}] {p.code} - {p.name}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Nội dung diễn giải</label>
-            <input
-              type="text"
-              placeholder={loaiHD === 'BR' ? 'Xuất bán lẻ hàng hóa, dịch vụ theo thỏa thuận' : 'Mua nguyên vật liệu chế biến may mặc chính'}
-              value={dienGiaiHD}
-              onChange={(e) => setDienGiaiHD(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500 font-sans"
-            />
-          </div>
-
-          {/* Account setups */}
-          <div className="bg-slate-50 p-4 rounded-xl space-y-4">
-            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Thiết lập tài khoản hạch toán</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-500">Tài khoản Nợ (Debit)</label>
-                <select
-                  value={tkNoHD}
-                  onChange={(e) => setTkNoHD(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
-                >
-                  {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-500">Tài khoản Có (Credit)</label>
-                <select
-                  value={tkCoHD}
-                  onChange={(e) => setTkCoHD(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
-                >
-                  {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-                </select>
-              </div>
-
-              {loaiHD === 'BR' && (
-                <>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500">TK Nợ Giá vốn</label>
-                    <select
-                      value={tkGiaVonNo}
-                      onChange={(e) => setTkGiaVonNo(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
-                    >
-                      {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-slate-500">TK Có Giá vốn</label>
-                    <select
-                      value={tkGiaVonCo}
-                      onChange={(e) => setTkGiaVonCo(e.target.value)}
-                      className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
-                    >
-                      {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-                    </select>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Lines Table item inputs */}
-          <div className="space-y-3">
-            <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase tracking-wider border-b pb-2">
-              <span className="font-bold">Danh sách Vật tư, Mặt hàng chi tiết</span>
-              <button
-                type="button"
-                onClick={handleAddInvoiceItemLine}
-                className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
-                id="add-invoice-line-btn"
-              >
-                + Thêm dòng vật tư
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {invoiceItems.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3.5 bg-slate-50/50 p-3 rounded-lg border border-slate-100 items-end">
-                  
-                  {/* Select item */}
-                  <div className="md:col-span-3 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Chọn hàng hóa</label>
-                    <select
-                      required
-                      value={line.maHang}
-                      onChange={(e) => handleUpdateInvoiceItem(idx, 'maHang', e.target.value)}
-                      className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs"
-                    >
-                      <option value="">-- Hàng hóa --</option>
-                      {items.map(i => (
-                        <option key={i.code} value={i.code}>{i.code} - {i.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Qty */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Số lượng</label>
-                    <input
-                      type="number"
-                      required
-                      min={1}
-                      value={line.soLuong}
-                      onChange={(e) => handleUpdateInvoiceItem(idx, 'soLuong', e.target.value)}
-                      className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs text-right"
-                    />
-                  </div>
-
-                  {/* Price */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Đơn giá (đ)</label>
-                    <input
-                      type="number"
-                      required
-                      value={line.donGia}
-                      onChange={(e) => handleUpdateInvoiceItem(idx, 'donGia', e.target.value)}
-                      className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs text-right"
-                    />
-                  </div>
-
-                  {/* VAT tax rate */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Thuế suất %</label>
-                    <select
-                      value={line.thueSuat}
-                      onChange={(e) => handleUpdateInvoiceItem(idx, 'thueSuat', Number(e.target.value))}
-                      className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs"
-                    >
-                      <option value={0}>0% (K.thụ)</option>
-                      <option value={5}>5%</option>
-                      <option value={8}>8% (Miễn giảm)</option>
-                      <option value={10}>10% (TM)</option>
-                    </select>
-                  </div>
-
-                  {/* Math sum calculations */}
-                  <div className="md:col-span-2 space-y-1 text-right">
-                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Giá trị hạch toán</span>
-                    <span className="text-xs font-mono font-bold block">{line.thanhTien.toLocaleString()} đ</span>
-                    <span className="text-[10px] text-slate-400 block font-normal">Thuế: {line.tienThue.toLocaleString()} đ</span>
-                  </div>
-
-                  {/* Remove line */}
-                  <div className="md:col-span-1 text-center">
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveInvoiceItemLine(idx)}
-                      disabled={invoiceItems.length === 1}
-                      className="p-1.5 text-slate-400 hover:text-red-600 disabled:opacity-30 cursor-pointer"
-                      id={`remove-invoice-line-${idx}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Form action */}
-          <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-            <div className="text-xs text-slate-500 font-medium">
-              Tổng giá trị: <strong className="text-slate-800 text-sm font-mono">{invoiceItems.reduce((s,i)=>s+i.thanhTien, 0).toLocaleString()} đ</strong> | Thuế GTGT: <strong className="text-slate-800 text-sm font-mono">{invoiceItems.reduce((s,i)=>s+i.tienThue, 0).toLocaleString()} đ</strong>
-            </div>
-            
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
-              id="submit-invoice-button"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              Ghi Sổ Chứng Từ Hóa Đơn
-            </button>
-          </div>
-        </form>
-      ) : (
-        // ==========================
-        // 2. FORM PHIẾU KẾ TOÁN (PHIEUKT)
-        // ==========================
-        <form onSubmit={handleJournalSubmit} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 md:p-8 space-y-6">
-          <div className="flex justify-between items-center border-b pb-4">
-            <h3 className="font-bold text-slate-800 text-base">Chứng từ kế toán tổng hợp (Phiếu hạch toán kép)</h3>
-            <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Double entry balanced manual ledger</span>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Mã số chứng từ</label>
+            {/* Ky hieu - shown only if Invoice Mode */}
+            {entryMode === 'HOA_DON' ? (
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-500 uppercase">Ký hiệu sê-ri</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="VD: BM/26E"
+                  value={kyHieuHD}
+                  onChange={(e) => setKyHieuHD(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 font-bold focus:outline-none focus:border-indigo-550"
+                  id="input-kyhieu-id"
+                />
+              </div>
+            ) : null}
+
+            {/* Document / Invoice ID number */}
+            <div className={`space-y-1 ${entryMode === 'KT_GOP' ? 'md:col-span-2' : ''}`}>
+              <label className="text-xs font-bold text-slate-500 uppercase">
+                {entryMode === 'HOA_DON' ? 'Số hóa đơn' : 'Mã số chứng từ'}
+              </label>
               <input
                 type="text"
                 required
-                placeholder="VD: PKT-05"
-                value={soCT}
-                onChange={(e) => setSoCT(e.target.value.toUpperCase())}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                placeholder={entryMode === 'HOA_DON' ? 'VD: 0000045' : 'VD: PT-001, PC-002, PKT-12'}
+                value={soDoc}
+                onChange={(e) => setSoDoc(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 font-bold focus:outline-none focus:border-indigo-550 placeholder:text-slate-350"
+                id="input-document-no"
               />
             </div>
+
+            {/* Posting date */}
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase">Ngày hạch toán</label>
               <input
                 type="date"
                 required
-                value={ngayCT}
-                onChange={(e) => setNgayCT(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                value={ngayDoc}
+                onChange={(e) => setNgayDoc(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 font-medium focus:outline-none focus:border-indigo-550"
+                id="input-posting-date"
               />
             </div>
-            <div className="space-y-1 md:col-span-2">
+
+            {/* Partner selector */}
+            <div className="space-y-1">
               <div className="flex justify-between items-center text-xs font-bold text-slate-500 uppercase">
-                <span>Đối tác liên quan (Không bắt buộc)</span>
+                <span>Đối tác liên đới</span>
                 <button
                   type="button"
                   onClick={() => {
+                    const prefix = entryMode === 'HOA_DON' ? (loaiHD === 'BR' ? 'KH' : 'NCC') : 'DT';
                     const randomSuffix = Math.floor(100 + Math.random() * 900);
-                    setNewPartnerCode(`KH-${randomSuffix}`);
+                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
                     setNewPartnerType('BOTH');
                     setShowQuickAddPartner(true);
                   }}
                   className="text-[11px] text-indigo-600 hover:text-indigo-800 font-bold hover:underline cursor-pointer"
-                  id="quick-add-partner-pkt-btn"
+                  id="quick-add-partner-trigger"
                 >
-                  + Đăng ký mới
+                  + Khai mới
                 </button>
               </div>
               <select
-                value={maKH_CT}
+                value={maKH}
                 onChange={(e) => {
                   if (e.target.value === '__add_new__') {
+                    const prefix = entryMode === 'HOA_DON' ? (loaiHD === 'BR' ? 'KH' : 'NCC') : 'DT';
                     const randomSuffix = Math.floor(100 + Math.random() * 900);
-                    setNewPartnerCode(`KH-${randomSuffix}`);
+                    setNewPartnerCode(`${prefix}-${randomSuffix}`);
                     setNewPartnerType('BOTH');
                     setShowQuickAddPartner(true);
                   } else {
-                    setMaKH_CT(e.target.value);
+                    setMaKH(e.target.value);
                   }
                 }}
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500"
+                className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 font-bold focus:outline-none focus:border-indigo-550"
+                id="select-partner"
               >
-                <option value="">-- Không hạch công nợ đối tác --</option>
-                <option value="__add_new__" className="text-indigo-600 font-bold font-sans">+ Đăng ký đối tác mới...</option>
+                <option value="">
+                  {entryMode === 'HOA_DON' ? '-- Chọn đối tác hạch toán --' : '-- Không hạch công nợ đối tác (Tùy chọn) --'}
+                </option>
+                <option value="__add_new__" className="text-indigo-600 font-bold">+ Khai báo nhanh đối tác mới...</option>
                 {partners.map(p => {
                   const typeLabel = p.type === 'CUSTOMER' ? 'KH' : p.type === 'VENDOR' ? 'NCC' : 'KH/NCC';
                   return (
@@ -728,150 +494,356 @@ export default function NhapLieu() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Nội dung diễn giải chứng từ</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">Nội dung diễn giải chung</label>
             <input
               type="text"
-              required
-              placeholder="Hạch toán trích khấu hao tài sản cố định hoặc chi tiêu tiền khác..."
-              value={dienGiaiCT}
-              onChange={(e) => setDienGiaiCT(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm focus:outline-none focus:border-indigo-500 font-sans"
+              placeholder={entryMode === 'HOA_DON' 
+                ? (loaiHD === 'BR' ? 'Xuất bán lẻ vải may mặc / chỉ may kì này' : 'Mua nguyên vật liệu chế biến may mặc chính nhập kho')
+                : 'Nhận góp vốn bổ sung, chuyển tiền, trích phân bổ khấu hao tài sản cố định...'
+              }
+              value={dienGiaiChung}
+              onChange={(e) => setDienGiaiChung(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-200 bg-white rounded-lg text-sm text-slate-800 focus:outline-none focus:border-indigo-550 font-sans"
+              id="input-general-description"
             />
           </div>
+        </div>
 
-          {/* Balanced Entry post table */}
-          <div className="space-y-3">
-            <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase tracking-wider border-b pb-2">
-              <span>Bút toán định khoản (Debit & Credit rows)</span>
+        {/* Section 2: DETAIL ENTRIES SHOWN CONDITIONALLY BASE ON SELECTION */}
+        {entryMode === 'KT_GOP' ? (
+          // ==========================
+          // DYNAMIC TRIAL LEDGER ROWS (Many-to-Many Debits & Credits)
+          // ==========================
+          <form onSubmit={handleVoucherSubmit} className="p-6 md:p-8 space-y-6">
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+                <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                  Bút toán định khoản chi tiết (Dynamic Double Entries Grid)
+                </span>
+                
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAddVoucherLine('No')}
+                    className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 rounded-lg text-xs font-bold cursor-pointer transition flex items-center gap-1"
+                    id="add-debit-line"
+                  >
+                    + Thêm tài khoản NỢ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAddVoucherLine('Co')}
+                    className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-lg text-xs font-bold cursor-pointer transition flex items-center gap-1"
+                    id="add-credit-line"
+                  >
+                    + Thêm tài khoản CÓ
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic spreadsheet lines */}
+              <div className="space-y-3">
+                {voucherLines.map((line, idx) => {
+                  const isDebit = line.loaiTK === 'No';
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`grid grid-cols-1 md:grid-cols-12 gap-3 p-3.5 rounded-xl border items-end transition-all ${
+                        isDebit 
+                          ? 'bg-indigo-50/15 border-indigo-100/70 hover:border-indigo-200' 
+                          : 'bg-emerald-50/10 border-emerald-100/60 hover:border-emerald-200'
+                      }`}
+                    >
+                      {/* Account column */}
+                      <div className="md:col-span-3 space-y-1">
+                        <label className="text-[10px] font-black text-slate-505 uppercase flex items-center gap-1">
+                          <span>Tài khoản</span>
+                          <span className={`text-[9px] px-1 rounded-sm uppercase ${
+                            isDebit ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {isDebit ? 'Nợ' : 'Có'}
+                          </span>
+                        </label>
+                        <select
+                          required
+                          value={line.soTK}
+                          onChange={(e) => handleUpdateVoucherLine(idx, 'soTK', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="">-- Tài khoản --</option>
+                          {accounts.map(a => (
+                            <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Side nature selection (No / Co) */}
+                      <div className="md:col-span-2 space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Tính chất vế</label>
+                        <select
+                          value={line.loaiTK}
+                          onChange={(e) => handleUpdateVoucherLine(idx, 'loaiTK', e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-lg text-xs text-slate-700 font-semibold focus:outline-none focus:border-indigo-500"
+                        >
+                          <option value="No">Ghi NỢ (Debit)</option>
+                          <option value="Co">Ghi CÓ (Credit)</option>
+                        </select>
+                      </div>
+
+                      {/* Number input for Amount */}
+                      <div className="md:col-span-3 space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">
+                          {isDebit ? 'Số tiền Ghi Nợ (Đ)' : 'Số tiền Ghi Có (Đ)'}
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={1}
+                          placeholder="Số tiền vnđ"
+                          value={line.soTien || ''}
+                          onChange={(e) => handleUpdateVoucherLine(idx, 'soTien', Math.abs(Number(e.target.value)) || 0)}
+                          className={`w-full px-2.5 py-1 border border-slate-200 bg-white rounded-lg text-xs font-mono text-right font-extrabold focus:outline-none focus:border-indigo-500 ${
+                            isDebit ? 'text-indigo-750' : 'text-emerald-750'
+                          }`}
+                        />
+                      </div>
+
+                      {/* Memo of current row */}
+                      <div className="md:col-span-3 space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase">Diễn giải hạch toán dòng</label>
+                        <input
+                          type="text"
+                          placeholder={dienGiaiChung || "Chi tiết phát sinh dòng..."}
+                          value={line.dienGiaiDong}
+                          onChange={(e) => handleUpdateVoucherLine(idx, 'dienGiaiDong', e.target.value)}
+                          className="w-full px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-700 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+
+                      {/* Delete button */}
+                      <div className="md:col-span-1 text-center pb-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveVoucherLine(idx)}
+                          className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                          id={`btn-remove-line-${idx}`}
+                          title="Xóa dòng định khoản"
+                        >
+                          <Trash2 className="w-4 h-4 mx-auto" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Trial Balance validator indicators */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between border-t border-slate-100 pt-5 gap-4">
+              <div className="flex gap-4 text-xs font-mono">
+                <div className="bg-indigo-50 text-indigo-900 p-3 rounded-xl border border-indigo-200">
+                  Tổng vế Nợ: <strong className="text-sm px-1 font-black">{sumDebits.toLocaleString()} đ</strong>
+                </div>
+                <div className="bg-emerald-50 text-emerald-900 p-3 rounded-xl border border-emerald-200">
+                  Tổng vế Có: <strong className="text-sm px-1 font-black">{sumCredits.toLocaleString()} đ</strong>
+                </div>
+              </div>
+
+              {isBalanced ? (
+                <div className="flex items-center gap-1.5 text-emerald-800 text-xs font-extrabold bg-emerald-50/70 px-4 py-2 rounded-xl border border-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  Trạng thái: Trùng khớp cân đối tài chính!
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-900 text-xs font-bold bg-amber-50 px-4 py-2 rounded-xl border border-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span>Độ hạch lệch cán cân: {Math.abs(sumDebits - sumCredits).toLocaleString()} đ</span>
+                </div>
+              )}
+
               <button
-                type="button"
-                onClick={handleAddVoucherLine}
-                className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1 cursor-pointer"
-                id="add-voucher-line-btn"
+                type="submit"
+                disabled={!isBalanced}
+                className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-all font-sans uppercase tracking-wider"
+                id="btn-save-general-voucher"
               >
-                + Thêm bút định khoản
+                Ghi sổ chứng từ hạch toán
               </button>
             </div>
-
-            <div className="space-y-3">
-              {voucherLines.map((line, idx) => (
-                <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-50/50 p-3 rounded-lg border border-slate-100 items-end">
-                  
-                  {/* TK */}
-                  <div className="md:col-span-3 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Tài khoản</label>
-                    <select
-                      required
-                      value={line.soTK}
-                      onChange={(e) => handleUpdateVoucherLine(idx, 'soTK', e.target.value)}
-                      className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
-                    >
-                      <option value="">-- TK --</option>
-                      {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
-                    </select>
-                  </div>
-
-                  {/* LoaiTK (Debit / Credit) */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase font-sans">Tính chất</label>
-                    <select
-                      value={line.loaiTK}
-                      onChange={(e) => handleUpdateVoucherLine(idx, 'loaiTK', e.target.value)}
-                      className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-sans"
-                    >
-                      <option value="No">Ghi NỢ (Debit)</option>
-                      <option value="Co">Ghi CÓ (Credit)</option>
-                    </select>
-                  </div>
-
-                  {/* Debit Amount */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Số tiền NỢ (Đ)</label>
-                    <input
-                      type="number"
-                      disabled={line.loaiTK === 'Co'}
-                      value={line.psNo}
-                      onChange={(e) => handleUpdateVoucherLine(idx, 'psNo', e.target.value)}
-                      className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs font-mono text-right text-emerald-800 disabled:opacity-40"
-                    />
-                  </div>
-
-                  {/* Credit Amount */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Số tiền CÓ (Đ)</label>
-                    <input
-                      type="number"
-                      disabled={line.loaiTK === 'No'}
-                      value={line.psCo}
-                      onChange={(e) => handleUpdateVoucherLine(idx, 'psCo', e.target.value)}
-                      className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs font-mono text-right text-rose-800 disabled:opacity-40"
-                    />
-                  </div>
-
-                  {/* Description for specific line */}
-                  <div className="md:col-span-2 space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Chi tiết nghiệp vụ</label>
-                    <input
-                      type="text"
-                      placeholder="Chi tiết phụ..."
-                      value={line.dienGiai || ''}
-                      onChange={(e) => handleUpdateVoucherLine(idx, 'dienGiai', e.target.value)}
-                      className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs"
-                    />
-                  </div>
-
-                  {/* Drop line */}
-                  <div className="md:col-span-1 text-center">
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveVoucherLine(idx)}
-                      disabled={voucherLines.length <= 2}
-                      className="p-1.5 text-slate-400 hover:text-red-500 disabled:opacity-30 cursor-pointer"
-                      id={`remove-voucher-line-${idx}`}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
+          </form>
+        ) : (
+          // ==========================
+          // MATERIAL INVOICE SCHEME (HOA_DON)
+          // ==========================
+          <form onSubmit={handleInvoiceSubmit} className="p-6 md:p-8 space-y-6">
+            {/* Account presets */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150 space-y-4">
+              <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest block">Thiết lập tài khoản hạch toán chính</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Tài khoản Nợ (Debit)</label>
+                  <select
+                    value={tkNoHD}
+                    onChange={(e) => setTkNoHD(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
+                  >
+                    {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+                  </select>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Tài khoản Có (Credit)</label>
+                  <select
+                    value={tkCoHD}
+                    onChange={(e) => setTkCoHD(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
+                  >
+                    {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+                  </select>
+                </div>
 
-          {/* Validation balanced check block */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between border-t border-slate-100 pt-5 gap-4">
-            <div className="flex gap-4 text-xs font-mono">
-              <div className="bg-emerald-50 text-emerald-800 p-2.5 rounded-lg border border-emerald-200">
-                Hiệu ứng Nợ: <strong>{sumDebits.toLocaleString()} đ</strong>
-              </div>
-              <div className="bg-rose-50 text-rose-800 p-2.5 rounded-lg border border-rose-200">
-                Hiệu ứng Có: <strong>{sumCredits.toLocaleString()} đ</strong>
+                {loaiHD === 'BR' && (
+                  <>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">TK Nợ Giá vốn</label>
+                      <select
+                        value={tkGiaVonNo}
+                        onChange={(e) => setTkGiaVonNo(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
+                      >
+                        {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">TK Có Giá vốn</label>
+                      <select
+                        value={tkGiaVonCo}
+                        onChange={(e) => setTkGiaVonCo(e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-slate-200 bg-white rounded-md text-xs font-mono font-bold"
+                      >
+                        {accounts.map(a => <option key={a.code} value={a.code}>{a.code} - {a.name}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            {isBalanced ? (
-              <div className="flex items-center gap-1.5 text-emerald-700 text-xs font-semibold bg-emerald-50 px-3 py-1.5 rounded-md border border-emerald-100">
+            {/* Inventory table item rows */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center text-xs font-semibold text-slate-500 uppercase tracking-wider border-b pb-2">
+                <span className="font-bold">Danh sách nguyên vật liệu, hàng hóa xuất nhập</span>
+                <button
+                  type="button"
+                  onClick={handleAddInvoiceItemLine}
+                  className="text-xs font-bold text-indigo-650 hover:underline flex items-center gap-1 cursor-pointer"
+                  id="add-invoice-item-trigger"
+                >
+                  + Thêm dòng vật tư
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {invoiceItems.map((line, idx) => (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-12 gap-3.5 bg-slate-50/50 p-3 rounded-xl border border-slate-150 items-end">
+                    {/* Select item code */}
+                    <div className="md:col-span-3 space-y-1 font-sans">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Mã hàng hóa vật tư</label>
+                      <select
+                        required
+                        value={line.maHang}
+                        onChange={(e) => handleUpdateInvoiceItem(idx, 'maHang', e.target.value)}
+                        className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs"
+                      >
+                        <option value="">-- Chọn hàng hóa --</option>
+                        {items.map(i => (
+                          <option key={i.code} value={i.code}>{i.code} - {i.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Quantity */}
+                    <div className="md:col-span-2 space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Số lượng</label>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        value={line.soLuong || ''}
+                        onChange={(e) => handleUpdateInvoiceItem(idx, 'soLuong', Math.abs(Number(e.target.value)) || 0)}
+                        className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs text-right font-mono"
+                      />
+                    </div>
+
+                    {/* Price */}
+                    <div className="md:col-span-2 space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Đơn giá (đ)</label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        value={line.donGia || ''}
+                        onChange={(e) => handleUpdateInvoiceItem(idx, 'donGia', Math.abs(Number(e.target.value)) || 0)}
+                        className="w-full px-2 py-1 border border-slate-200 bg-white rounded-md text-xs text-right font-mono"
+                      />
+                    </div>
+
+                    {/* VAT rate option select */}
+                    <div className="md:col-span-2 space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Thuế suất %</label>
+                      <select
+                        value={line.thueSuat}
+                        onChange={(e) => handleUpdateInvoiceItem(idx, 'thueSuat', Number(e.target.value))}
+                        className="w-full px-2 py-1.5 border border-slate-200 bg-white rounded-md text-xs"
+                      >
+                        <option value={0}>0% (K.thụ)</option>
+                        <option value={5}>5%</option>
+                        <option value={8}>8% (Miễn giảm)</option>
+                        <option value={10}>10% (TM)</option>
+                      </select>
+                    </div>
+
+                    {/* Computations result info */}
+                    <div className="md:col-span-2 space-y-1 text-right">
+                      <span className="text-[10px] font-bold text-slate-400 block uppercase">Giá trị thực hạch</span>
+                      <span className="text-xs font-mono font-bold block">{line.thanhTien.toLocaleString()} đ</span>
+                      <span className="text-[10px] text-slate-400 block font-normal">Thuế GTGT: {line.tienThue.toLocaleString()} đ</span>
+                    </div>
+
+                    {/* Drop row */}
+                    <div className="md:col-span-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveInvoiceItemLine(idx)}
+                        disabled={invoiceItems.length === 1}
+                        className="p-1.5 text-slate-400 hover:text-red-500 disabled:opacity-30 cursor-pointer"
+                        id={`btn-remove-invoice-item-${idx}`}
+                      >
+                        <Trash2 className="w-4 h-4 mx-auto" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Action panel */}
+            <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="text-xs text-slate-500 font-medium">
+                Tổng tiền chưa thuế: <strong className="text-slate-800 text-sm font-mono">{invoiceItems.reduce((s,i)=>s+i.thanhTien, 0).toLocaleString()} đ</strong> | Thuế GTGT: <strong className="text-slate-800 text-sm font-mono">{invoiceItems.reduce((s,i)=>s+i.tienThue, 0).toLocaleString()} đ</strong>
+              </div>
+              
+              <button
+                type="submit"
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md font-sans uppercase tracking-wider"
+                id="btn-save-invoice"
+              >
                 <CheckCircle2 className="w-4 h-4" />
-                Cân đối bút toán thành công!
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 text-amber-700 text-xs font-semibold bg-amber-50 px-3 py-1.5 rounded-md border border-amber-100">
-                <AlertTriangle className="w-4 h-4" />
-                Độ chênh lệch hạch toán: {Math.abs(sumDebits - sumCredits).toLocaleString()} đ
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={!isBalanced}
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-md"
-              id="submit-journal-button"
-            >
-              Ghi sổ chứng từ phức kép
-            </button>
-          </div>
-        </form>
-      )}
+                Ghi sổ Hóa đơn Chứng từ
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
 
       {/* QUICK ADD PARTNER MODAL DIALOG */}
       {showQuickAddPartner && (
@@ -895,6 +867,7 @@ export default function NhapLieu() {
                   setQuickAddError('');
                 }}
                 className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-650 rounded-xl transition cursor-pointer"
+                id="btn-close-quickadd-partner"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -921,7 +894,7 @@ export default function NhapLieu() {
                       setNewPartnerCode(e.target.value.toUpperCase());
                       setQuickAddError('');
                     }}
-                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-500 font-bold"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-550 font-bold"
                   />
                   <span className="text-[9px] text-slate-400 block font-normal">Duy nhất, không dấu cách</span>
                 </div>
@@ -931,7 +904,7 @@ export default function NhapLieu() {
                   <select
                     value={newPartnerType}
                     onChange={(e) => setNewPartnerType(e.target.value as any)}
-                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-medium"
+                    className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-550 font-medium"
                   >
                     <option value="CUSTOMER">Khách hàng (131)</option>
                     <option value="VENDOR">Nhà cung cấp (331)</option>
@@ -951,7 +924,7 @@ export default function NhapLieu() {
                     setNewPartnerName(e.target.value);
                     setQuickAddError('');
                   }}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-550"
                 />
               </div>
 
@@ -962,7 +935,7 @@ export default function NhapLieu() {
                   placeholder="0102030405-001"
                   value={newPartnerTaxCode}
                   onChange={(e) => setNewPartnerTaxCode(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-500"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs font-mono focus:outline-none focus:border-indigo-550"
                 />
               </div>
 
@@ -973,7 +946,7 @@ export default function NhapLieu() {
                   placeholder="Số 45, Đường Giải Phóng, Hai Bà Trưng, Hà Nội"
                   value={newPartnerAddress}
                   onChange={(e) => setNewPartnerAddress(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-500"
+                  className="w-full px-2.5 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-xs focus:outline-none focus:border-indigo-550"
                 />
               </div>
 
@@ -1009,18 +982,19 @@ export default function NhapLieu() {
                     setQuickAddError('');
                   }}
                   className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-lg text-xs transition cursor-pointer"
+                  id="btn-quick-add-cancel"
                 >
                   Bỏ qua
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer flex items-center gap-1 shadow-sm"
+                  id="btn-quick-add-submit"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   Đăng ký & Chọn
                 </button>
               </div>
-
             </form>
           </div>
         </div>

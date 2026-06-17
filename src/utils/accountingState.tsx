@@ -56,6 +56,8 @@ interface AccountingState {
   };
   syncWithCloud: (direction: 'upload' | 'download') => Promise<boolean>;
   importState: (data: any) => void;
+  currentUser: { id: string; username: string; email: string; fullName: string; role: 'ADMIN' | 'ACCOUNTANT' };
+  setCurrentUser: (user: any) => void;
 }
 
 const AccountingContext = createContext<AccountingState | undefined>(undefined);
@@ -120,6 +122,15 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     error: string | null;
     success: string | null;
   }>({ loading: false, error: null, success: null });
+
+  const [currentUser, setCurrentUser] = useState<{ id: string; username: string; email: string; fullName: string; role: 'ADMIN' | 'ACCOUNTANT' }>(() => {
+    const saved = localStorage.getItem('smartaccount_current_user');
+    return saved ? JSON.parse(saved) : { id: 'usr-001', username: 'admin_binh', email: 'binhphan.222720@gmail.com', fullName: 'Bình Phan (Quản trị viên)', role: 'ADMIN' };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('smartaccount_current_user', JSON.stringify(currentUser));
+  }, [currentUser]);
 
   // Persistence triggers
   useEffect(() => {
@@ -390,7 +401,9 @@ export const AccountingProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       resetToDefault,
       cloudSyncStatus,
       syncWithCloud,
-      importState
+      importState,
+      currentUser,
+      setCurrentUser
     }}>
       {children}
     </AccountingContext.Provider>

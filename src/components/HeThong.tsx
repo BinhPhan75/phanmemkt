@@ -35,7 +35,9 @@ export default function HeThong() {
     allTransactions,
     resetToDefault,
     companyInfo,
-    updateCompanyInfo
+    updateCompanyInfo,
+    currentUser,
+    setCurrentUser
   } = useAccounting() as any;
 
   // Local state for company profile form fields
@@ -76,6 +78,10 @@ export default function HeThong() {
 
   const handleSaveCompanyInfo = (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.role !== 'ADMIN') {
+      alert('🔒 Thao tác bị từ chối! Chỉ người dùng có vai trò [ADMIN] mới được phép sửa đổi cấu hình và thông tin doanh nghiệp.');
+      return;
+    }
     updateCompanyInfo({
       name: compName,
       address: compAddress,
@@ -101,6 +107,10 @@ export default function HeThong() {
 
   const handleCreateNewYear = (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.role !== 'ADMIN') {
+      alert('🔒 Thao tác bị từ chối! Chỉ người dùng có vai trò [ADMIN] mới được phép khởi tạo năm hạch toán mới.');
+      return;
+    }
     const cleanYear = newYearInput.trim();
     if (!cleanYear || isNaN(Number(cleanYear)) || cleanYear.length !== 4) {
       alert('Vui lòng nhập định dạng năm bằng 4 chữ số (ví dụ: 2027)!');
@@ -175,6 +185,106 @@ export default function HeThong() {
         <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 py-1.5 px-3.5 rounded-full text-xs font-bold border border-emerald-100 shadow-xs">
           <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></span>
           <span>Hệ thống hoạt động ổn định local</span>
+        </div>
+      </div>
+
+      {/* PHÂN QUYỀN VÀ USER ACCOUNT MAPPING TO SUPABASE */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-4 font-sans" id="section-phan-quyen-nguoi-dung">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="p-1 px-2 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-bold font-mono">Table: accounting_users</span>
+            <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Phân quyền & Tài khoản người dùng (Supabase Auth/Roles)</h3>
+          </div>
+          <span className="text-[10px] text-amber-600 font-extrabold font-mono bg-amber-50 border border-amber-150 px-2 py-0.5 rounded-md flex items-center gap-1">
+            <Lock className="w-2.5 h-2.5" /> Phân quyền hạch toán
+          </span>
+        </div>
+
+        <p className="text-[11px] text-slate-500 leading-relaxed font-normal">
+          Bảng <code className="bg-slate-100 px-1 py-0.5 text-slate-700 font-mono text-[10px] rounded">accounting_users</code> trên Supabase quản lý danh sách người dùng và vai trò để phân tách quyền hạn (Role-based access controls):
+          <br />• <strong className="text-slate-800">ADMIN (Quản trị viên)</strong>: Toàn quyền cấu hình kết nối API, tạo/khóa niên độ hạch toán, khôi phục hoặc đặt lại dữ liệu hạch toán ban đầu.
+          <br />• <strong className="text-slate-800">ACCOUNTANT (Kế toán viên)</strong>: Thao tác lập phiếu hạch toán (Hóa đơn, Phiếu thu/chi quỹ, Báo nợ/có) thường nhật nhưng bị đóng băng các lệnh quản lý cấu hình lõi hệ thống.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+          {/* User selector list */}
+          <div className="border border-slate-150 rounded-xl p-4 space-y-3 bg-slate-50/40">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block">Chọn tài khoản người dùng hạch toán:</span>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentUser({
+                    id: 'usr-001',
+                    username: 'admin_binh',
+                    email: 'binhphan.222720@gmail.com',
+                    fullName: 'Bình Phan (Quản trị viên)',
+                    role: 'ADMIN'
+                  });
+                }}
+                className={`w-full p-2.5 rounded-xl text-left transition text-xs flex justify-between items-center border cursor-pointer ${
+                  currentUser?.id === 'usr-001'
+                    ? 'bg-indigo-50 border-indigo-255 text-indigo-900 font-bold shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-600 font-medium'
+                }`}
+              >
+                <div>
+                  <p className="font-bold text-slate-800">admin_binh (Bình Phan)</p>
+                  <p className="text-[10px] text-slate-400 font-normal">Email: binhphan.222720@gmail.com</p>
+                </div>
+                <span className="px-2 py-0.5 bg-indigo-600 text-white font-extrabold text-[8px] rounded-md uppercase tracking-wider">ADMIN</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentUser({
+                    id: 'usr-002',
+                    username: 'ketoan_lan',
+                    email: 'lan.nguyen@example.com',
+                    fullName: 'Nguyễn Thị Lan (Kế toán)',
+                    role: 'ACCOUNTANT'
+                  });
+                }}
+                className={`w-full p-2.5 rounded-xl text-left transition text-xs flex justify-between items-center border cursor-pointer ${
+                  currentUser?.id === 'usr-002'
+                    ? 'bg-emerald-50 border-emerald-255 text-emerald-950 font-bold shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-600 font-medium'
+                }`}
+              >
+                <div>
+                  <p className="font-bold text-slate-800">ketoan_lan (Nguyễn Thị Lan)</p>
+                  <p className="text-[10px] text-slate-400 font-normal">Email: lan.nguyen@example.com</p>
+                </div>
+                <span className="px-2 py-0.5 bg-teal-600 text-white font-extrabold text-[8px] rounded-md uppercase tracking-wider">ACCOUNTANT</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Current Selection Status info */}
+          <div className="border border-indigo-100 rounded-xl p-4 bg-indigo-50/20 flex flex-col justify-between">
+            <div className="space-y-1">
+              <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block">Trạng thái phân quyền hệ thống:</span>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className="font-extrabold text-xs text-slate-800">{currentUser?.fullName}</span>
+                <span className={`px-2 py-0.5 font-mono text-[8px] font-extrabold rounded-md uppercase ${
+                  currentUser?.role === 'ADMIN' ? 'bg-indigo-100 text-indigo-800' : 'bg-emerald-150 text-emerald-800'
+                }`}>
+                  {currentUser?.role}
+                </span>
+              </div>
+              <p className="text-[10.5px] text-slate-600 mt-2 leading-relaxed">
+                {currentUser?.role === 'ADMIN' 
+                  ? '✓ Bạn có quyền quản trị tối cao của hệ thống. Bạn được phép thay đổi thông tin doanh nghiệp, mở niên độ, khóa sổ tài chính năm học hạch toán, sao lưu và đồng bộ đẩy/tải dữ liệu trực tiếp với dịch vụ Supabase Cloud.'
+                  : '⚠ Bạn đang truy cập với quyền kế toán hành sự. Chức năng sửa cấu hình lõi hệ thống đã khóa để tránh làm hỏng tệp sổ gốc. Hệ thống cho phép bạn toàn quyền hạch hóa hóa đơn, phiếu thu chi quỹ, và xuất sổ kế toán.'}
+              </p>
+            </div>
+            
+            <div className="text-[9px] text-indigo-600 italic font-medium flex items-center gap-1 mt-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+              Đồng nhất với schema DDL Supabase và chính sách Row Level Security (RLS)
+            </div>
+          </div>
         </div>
       </div>
 
@@ -507,7 +617,13 @@ export default function HeThong() {
 
                       <button
                         type="button"
-                        onClick={() => closeYear(year)}
+                        onClick={() => {
+                          if (currentUser?.role !== 'ADMIN') {
+                            alert('🔒 Thao tác bị từ chối! Chỉ người dùng có vai trò [ADMIN] mới được phép khóa/mở khóa sổ kế toán của năm.');
+                            return;
+                          }
+                          closeYear(year);
+                        }}
                         className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-1 cursor-pointer transition ${
                           isLocked 
                             ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
@@ -604,7 +720,15 @@ export default function HeThong() {
               <p className="text-[9px] text-slate-400 font-normal">Xóa toàn mảng và tải lại định mức ban đầu</p>
             </div>
             <button
-              onClick={resetToDefault}
+              onClick={() => {
+                if (currentUser?.role !== 'ADMIN') {
+                  alert('🔒 Thao tác bị từ chối! Chỉ người dùng có vai trò [ADMIN] mới được phép reset dữ liệu gốc hạch toán.');
+                  return;
+                }
+                if (window.confirm('Cảnh báo! Bạn có chắc chắn muốn xóa sạch dữ liệu hiện tại để đưa về cấu hình ban đầu không?')) {
+                  resetToDefault();
+                }
+              }}
               type="button"
               className="px-3 py-1.5 border border-rose-200 hover:bg-rose-50 text-rose-700 font-black text-[10px] uppercase rounded-lg transition cursor-pointer"
               id="btn-reset-data-default"

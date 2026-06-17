@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS accounting_allocations (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
+-- 6. Bảng Người dùng và Phân quyền
+CREATE TABLE IF NOT EXISTS accounting_users (
+  id TEXT PRIMARY KEY,
+  username VARCHAR(100) UNIQUE NOT NULL,
+  email VARCHAR(100),
+  full_name TEXT,
+  role VARCHAR(50) NOT NULL DEFAULT 'ACCOUNTANT', -- ADMIN (Quản trị hệ thống), ACCOUNTANT (Kế toán viên)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
 -- Bật Row Level Security (RLS) hoặc cho phép truy cập nặc danh phục vụ demo
 -- Để đơn giản trong quá trình kết nối nặc danh qua Service Key / Anon Key:
 ALTER TABLE accounting_accounts ENABLE ROW LEVEL SECURITY;
@@ -108,6 +118,7 @@ ALTER TABLE accounting_partners ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounting_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounting_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounting_allocations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounting_users ENABLE ROW LEVEL SECURITY;
 
 -- Tạo chính sách cho phép mọi người đọc ghi qua anon key (SỬ DỤNG CHO DEMO VÀ PHÁT TRIỂN)
 CREATE POLICY "Allow public select" ON accounting_accounts FOR SELECT USING (true);
@@ -134,6 +145,19 @@ CREATE POLICY "Allow public select" ON accounting_allocations FOR SELECT USING (
 CREATE POLICY "Allow public insert" ON accounting_allocations FOR INSERT WITH CHECK (true);
 CREATE POLICY "Allow public update" ON accounting_allocations FOR UPDATE USING (true);
 CREATE POLICY "Allow public delete" ON accounting_allocations FOR DELETE USING (true);
+
+-- Cho phép CRUD bảng người dùng công dụng kiểm tra phân quyền
+CREATE POLICY "Allow public select" ON accounting_users FOR SELECT USING (true);
+CREATE POLICY "Allow public insert" ON accounting_users FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update" ON accounting_users FOR UPDATE USING (true);
+CREATE POLICY "Allow public delete" ON accounting_users FOR DELETE USING (true);
+
+-- Chêm dữ liệu người dùng mẫu
+INSERT INTO accounting_users (id, username, email, full_name, role)
+VALUES 
+  ('usr-001', 'admin_binh', 'binhphan.222720@gmail.com', 'Bình Phan (Quản trị viên)', 'ADMIN'),
+  ('usr-002', 'ketoan_lan', 'lan.nguyen@example.com', 'Nguyễn Thị Lan (Kế toán)', 'ACCOUNTANT')
+ON CONFLICT (id) DO NOTHING;
 `;
 }
 

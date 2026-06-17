@@ -13,7 +13,7 @@ import InAnSoSach from './components/InAnSoSach';
 import BaoCaoTaiChinh from './components/BaoCaoTaiChinh';
 import NhapLieu from './components/NhapLieu';
 import HeThong from './components/HeThong';
-import { getSupabaseConfig, saveSupabaseConfig } from './utils/supabaseService';
+import { getSupabaseConfig, saveSupabaseConfig, getSupabaseSQLScript } from './utils/supabaseService';
 
 import { 
   Briefcase, 
@@ -51,39 +51,7 @@ export default function App() {
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
 
   // Auto generated Supabase table definition script (for user's easy onboarding)
-  const ddlSetupSql = `-- SQL DATABASE SETUP FOR SUPABASE
--- Run these scripts inside the SQL Editor of your Supabase dashboard to create the tables!
-
--- 1. Create Partners Directory Table
-CREATE TABLE IF NOT EXISTS public.partners (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    name TEXT NOT NULL,
-    tax_code TEXT,
-    address TEXT,
-    type TEXT NOT NULL,
-    opening_debit NUMERIC DEFAULT 0,
-    opening_credit NUMERIC DEFAULT 0
-);
-
--- 2. Create Inventory Items Table
-CREATE TABLE IF NOT EXISTS public.inventory_items (
-    id TEXT PRIMARY KEY,
-    code TEXT NOT NULL,
-    name TEXT NOT NULL,
-    unit TEXT NOT NULL,
-    account TEXT NOT NULL,
-    opening_qty NUMERIC DEFAULT 0,
-    opening_value NUMERIC DEFAULT 0
-);
-
--- 3. Create Transactions Registry Table
-CREATE TABLE IF NOT EXISTS public.transactions (
-    id TEXT PRIMARY KEY,
-    payload JSONB NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-`;
+  const ddlSetupSql = getSupabaseSQLScript();
 
   const handleCopySql = () => {
     navigator.clipboard.writeText(ddlSetupSql);
